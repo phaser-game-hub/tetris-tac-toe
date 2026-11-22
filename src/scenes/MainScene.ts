@@ -3,6 +3,7 @@ import { Game } from '../game/Game';
 import type { ClearStep } from '../game/Game';
 import { COLS, ROWS } from '../game/model';
 import type { Grid, SymbolType } from '../game/model';
+import type { TaskCompletion, TaskState } from '../game/taskConfig';
 
 const CELL = 38;
 const BOARD_X = 170;
@@ -47,6 +48,13 @@ export default class MainScene extends Phaser.Scene {
     private comboBadge!: Phaser.GameObjects.Container;
     private comboLabel!: Phaser.GameObjects.Text;
     private comboGain!: Phaser.GameObjects.Text;
+    private taskTitle!: Phaser.GameObjects.Text;
+    private taskDescription!: Phaser.GameObjects.Text;
+    private taskProgressText!: Phaser.GameObjects.Text;
+    private taskRewardText!: Phaser.GameObjects.Text;
+    private taskProgressGfx!: Phaser.GameObjects.Graphics;
+    private taskToast!: Phaser.GameObjects.Container;
+    private taskToastReward!: Phaser.GameObjects.Text;
 
     private paused = false;
     private dropAcc = 0;
@@ -59,6 +67,7 @@ export default class MainScene extends Phaser.Scene {
     private displayScore: number | null = null;
     private displayLevel: number | null = null;
     private displayLines: number | null = null;
+    private displayTask: TaskState | null = null;
 
     constructor() {
         super('MainScene');
@@ -73,6 +82,7 @@ export default class MainScene extends Phaser.Scene {
         this.drawPanels();
         this.createUi();
         this.createComboBadge();
+        this.createTaskToast();
         this.nextGfx = this.add.graphics();
         this.createButtons();
         this.createOverlay();
@@ -167,6 +177,7 @@ export default class MainScene extends Phaser.Scene {
         this.panel(16, 96, 134, 250);
         this.panel(16, 366, 134, 178);
         this.panel(570, 96, 134, 500);
+        this.panel(570, 606, 134, 244);
 
         const g = this.add.graphics();
         for (let i = 0; i < 4; i += 1) {
@@ -222,6 +233,55 @@ export default class MainScene extends Phaser.Scene {
             fontStyle: 'bold',
             color: '#cfc9ff',
         }).setOrigin(0.5, 0);
+
+        this.add.text(637, 618, 'TASK', {
+            fontFamily: FONT,
+            fontSize: '16px',
+            fontStyle: 'bold',
+            color: '#cfc9ff',
+        }).setOrigin(0.5, 0);
+
+        this.taskTitle = this.add.text(637, 646, '', {
+            fontFamily: FONT,
+            fontSize: '12px',
+            fontStyle: 'bold',
+            color: '#ffd76a',
+            align: 'center',
+            wordWrap: { width: 114 },
+            lineSpacing: 2,
+        }).setOrigin(0.5, 0);
+
+        this.taskDescription = this.add.text(637, 690, '', {
+            fontFamily: FONT,
+            fontSize: '11px',
+            color: MUTED_COLOR,
+            align: 'center',
+            wordWrap: { width: 114 },
+            lineSpacing: 2,
+        }).setOrigin(0.5, 0);
+
+        this.taskProgressText = this.add.text(637, 740, '', {
+            fontFamily: FONT,
+            fontSize: '13px',
+            fontStyle: 'bold',
+            color: TEXT_COLOR,
+        }).setOrigin(0.5, 0);
+
+        this.taskProgressGfx = this.add.graphics();
+
+        this.taskRewardText = this.add.text(637, 784, '', {
+            fontFamily: FONT,
+            fontSize: '18px',
+            fontStyle: 'bold',
+            color: '#ffd76a',
+        }).setOrigin(0.5, 0);
+
+        this.add.text(637, 810, 'НАГРАДА', {
+            fontFamily: FONT,
+            fontSize: '9px',
+            fontStyle: 'bold',
+            color: MUTED_COLOR,
+        }).setOrigin(0.5, 0);
     }
 
     private createComboBadge(): void {
@@ -247,6 +307,31 @@ export default class MainScene extends Phaser.Scene {
 
         this.comboBadge = this.add.container(360, 470, [bg, this.comboLabel, this.comboGain]);
         this.comboBadge.setDepth(60).setVisible(false);
+    }
+
+    private createTaskToast(): void {
+        const bg = this.add.graphics();
+        bg.fillStyle(0x14173f, 0.94);
+        bg.fillRoundedRect(-170, -48, 340, 96, 20);
+        bg.lineStyle(2, 0xffd76a, 0.9);
+        bg.strokeRoundedRect(-170, -48, 340, 96, 20);
+
+        const label = this.add.text(0, -22, 'ЗАДАНИЕ ВЫПОЛНЕНО', {
+            fontFamily: FONT,
+            fontSize: '18px',
+            fontStyle: 'bold',
+            color: '#ffd76a',
+        }).setOrigin(0.5);
+
+        this.taskToastReward = this.add.text(0, 18, '', {
+            fontFamily: FONT,
+            fontSize: '28px',
+            fontStyle: 'bold',
+            color: '#f4f2ff',
+        }).setOrigin(0.5);
+
+        this.taskToast = this.add.container(360, 268, [bg, label, this.taskToastReward]);
+        this.taskToast.setDepth(60).setVisible(false);
     }
 
     private createButtons(): void {
@@ -410,7 +495,9 @@ export default class MainScene extends Phaser.Scene {
         this.displayScore = null;
         this.displayLevel = null;
         this.displayLines = null;
+        this.displayTask = null;
         this.hideCombo();
+        this.hideTaskToast();
 
         this.state = new Game();
         this.paused = false;
@@ -439,8 +526,13 @@ export default class MainScene extends Phaser.Scene {
         this.displayScore = step.score;
         this.displayLevel = step.level;
         this.displayLines = step.lines;
+        this.displayTask = step.task;
         this.render();
         this.showCombo(step);
+
+        if (step.taskCompleted) {
+            this.showTaskComplete(step.taskCompleted);
+        }
 
         const hold = step.combo >= 2 ? 420 : 300;
 
@@ -481,6 +573,31 @@ export default class MainScene extends Phaser.Scene {
         this.comboBadge.setVisible(false).setAlpha(1).setScale(1);
     }
 
+    private showTaskComplete(completion: TaskCompletion): void {
+        this.taskToastReward.setText(`+${completion.reward}`);
+
+        this.tweens.killTweensOf(this.taskToast);
+        this.taskToast.setVisible(true).setAlpha(1).setScale(0.8);
+
+        this.tweens.add({
+            targets: this.taskToast,
+            scale: 1,
+            duration: 180,
+            ease: 'Back.Out',
+        });
+        this.tweens.add({
+            targets: this.taskToast,
+            alpha: 0,
+            delay: 900,
+            duration: 220,
+        });
+    }
+
+    private hideTaskToast(): void {
+        this.tweens.killTweensOf(this.taskToast);
+        this.taskToast.setVisible(false).setAlpha(1).setScale(1);
+    }
+
     private finishClear(): void {
         this.clearTimer = undefined;
         this.resolving = false;
@@ -490,6 +607,7 @@ export default class MainScene extends Phaser.Scene {
         this.displayScore = null;
         this.displayLevel = null;
         this.displayLines = null;
+        this.displayTask = null;
         this.hideCombo();
         this.render();
 
@@ -562,7 +680,44 @@ export default class MainScene extends Phaser.Scene {
         this.scoreText.setText(this.formatScore(this.displayScore ?? this.state.score));
         this.levelText.setText(String(this.displayLevel ?? this.state.level));
         this.linesText.setText(String(this.displayLines ?? this.state.lines));
+        this.renderTask(this.displayTask ?? this.state.task);
         this.renderNext();
+    }
+
+    private renderTask(task: TaskState): void {
+        const definition = task.definition;
+        const titleColor =
+            definition.symbol === 'X'
+                ? '#9cc4ff'
+                : definition.symbol === 'O'
+                  ? '#ffb26b'
+                  : '#ffd76a';
+
+        this.taskTitle.setText(definition.title).setColor(titleColor);
+        this.taskDescription.setText(definition.description);
+        this.taskProgressText.setText(
+            `${Math.min(task.progress, definition.target)} / ${definition.target}`,
+        );
+        this.taskRewardText.setText(`+${definition.reward}`);
+
+        const g = this.taskProgressGfx;
+        g.clear();
+
+        const x = 580;
+        const y = 766;
+        const width = 114;
+        const height = 9;
+        const ratio = definition.target > 0 ? Math.min(1, task.progress / definition.target) : 0;
+
+        g.fillStyle(SLOT_FILL, 0.9);
+        g.fillRoundedRect(x, y, width, height, height / 2);
+        g.lineStyle(1, PANEL_EDGE, 0.45);
+        g.strokeRoundedRect(x, y, width, height, height / 2);
+
+        if (ratio > 0) {
+            g.fillStyle(0xffd76a, 0.95);
+            g.fillRoundedRect(x, y, Math.max(height, width * ratio), height, height / 2);
+        }
     }
 
     private renderNext(): void {

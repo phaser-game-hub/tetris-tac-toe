@@ -1,5 +1,7 @@
 import type { Cell, Coord, Grid, MatchGroup, Piece, SymbolType } from './model';
 import { comboTierFor } from './comboConfig';
+import { randomTask, taskMatchesLine } from './taskConfig';
+import type { TaskCompletion, TaskLine, TaskState } from './taskConfig';
 import {
     COLS,
     ROWS,
@@ -35,6 +37,12 @@ export interface ClearStep {
     score: number;
     level: number;
     lines: number;
+    /** Линии, очищенные на этом шаге. */
+    matches: TaskLine[];
+    /** Состояние задания после этого шага. */
+    task: TaskState;
+    /** Задание, выполненное на этом шаге (если есть). */
+    taskCompleted?: TaskCompletion;
 }
 
 export class Game {
@@ -46,6 +54,7 @@ export class Game {
     level = 1;
     lines = 0;
     gameOver = false;
+    task: TaskState = { definition: randomTask(), progress: 0 };
 
     constructor() {
         for (let i = 0; i < 4; i += 1) {
@@ -242,6 +251,11 @@ export class Game {
             }
 
             const groupsCleared = selected.length;
+            const matches: TaskLine[] = selected.map((group) => ({
+                symbol: group.cells[0].symbol,
+                direction: group.direction,
+                length: group.cells.length,
+            }));
 
             combo += 1;
             const before = this.grid.map((row) => row.slice());
@@ -264,6 +278,7 @@ export class Game {
             this.score += gained;
             this.lines += groupsCleared;
             this.level = 1 + Math.floor(this.lines / 10);
+            const taskCompleted = this.advanceTask(matches);
 
             steps.push({
                 before,
@@ -279,6 +294,9 @@ export class Game {
                 score: this.score,
                 level: this.level,
                 lines: this.lines,
+                matches,
+                task: { definition: this.task.definition, progress: this.task.progress },
+                taskCompleted,
             });
 
             const moved = applyGravity(this.grid);
@@ -289,5 +307,30 @@ export class Game {
         }
 
         return steps;
+    }
+
+    /**
+     * Продвигает текущее задание по очищенным линиям. Когда прогресс
+     * достигает цели, начисляет награду и выбирает новое случайное задание.
+     */
+    private advanceTask(matches: TaskLine[]): TaskCompletion | undefined {
+        const matched = matches.filter((line) => taskMatchesLine(this.task.definition, line)).length;
+        if (matched === 0) return undefined;
+
+        this.task.progress += matched;
+
+        if (this.task.progress < this.task.definition.target) {
+            return undefined;
+        }
+
+        const completion: TaskCompletion = {
+            definition: this.task.definition,
+            reward: this.task.definition.reward,
+        };
+
+        this.score += completion.reward;
+        this.task = { definition: randomTask(completion.definition.id), progress: 0 };
+
+        return completion;
     }
 }
