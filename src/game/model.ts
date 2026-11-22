@@ -17,9 +17,6 @@ export interface Piece {
 
 export type Grid = (Cell | null)[][];
 
-export const COLS = 10;
-export const ROWS = 20;
-
 const SHAPES: Coord[][] = [
     // I
     [[0, 0], [0, 1], [0, 2], [0, 3]],
@@ -42,8 +39,8 @@ const COLORS: Record<SymbolType, number[]> = {
     O: [0xf59a3c, 0xf2649a],
 };
 
-export function createGrid(): Grid {
-    return Array.from({ length: ROWS }, () => Array<Cell | null>(COLS).fill(null));
+export function createGrid(cols: number, rows: number): Grid {
+    return Array.from({ length: rows }, () => Array<Cell | null>(cols).fill(null));
 }
 
 export function normalize(cells: Coord[]): Coord[] {
@@ -76,8 +73,8 @@ export function randomPiece(): Piece {
     return { cells, symbol, color, row: 0, col: 0 };
 }
 
-function inside(row: number, col: number): boolean {
-    return row >= 0 && row < ROWS && col >= 0 && col < COLS;
+function inside(grid: Grid, row: number, col: number): boolean {
+    return row >= 0 && row < grid.length && col >= 0 && col < grid[0].length;
 }
 
 export type MatchDirection = 'horizontal' | 'vertical' | 'diagonal';
@@ -101,16 +98,18 @@ const DIRECTIONS: { dr: number; dc: number; direction: MatchDirection }[] = [
  */
 export function findMatchGroups(grid: Grid): MatchGroup[] {
     const groups: MatchGroup[] = [];
+    const rows = grid.length;
+    const cols = grid[0].length;
 
-    for (let row = 0; row < ROWS; row += 1) {
-        for (let col = 0; col < COLS; col += 1) {
+    for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < cols; col += 1) {
             const cell = grid[row][col];
             if (!cell) continue;
 
             for (const { dr, dc, direction } of DIRECTIONS) {
                 const prevRow = row - dr;
                 const prevCol = col - dc;
-                if (inside(prevRow, prevCol) && grid[prevRow][prevCol]?.symbol === cell.symbol) {
+                if (inside(grid, prevRow, prevCol) && grid[prevRow][prevCol]?.symbol === cell.symbol) {
                     continue;
                 }
 
@@ -118,7 +117,7 @@ export function findMatchGroups(grid: Grid): MatchGroup[] {
                 let r = row;
                 let c = col;
 
-                while (inside(r, c)) {
+                while (inside(grid, r, c)) {
                     const current = grid[r][c];
                     if (!current || current.symbol !== cell.symbol) break;
                     run.push(current);
@@ -138,11 +137,13 @@ export function findMatchGroups(grid: Grid): MatchGroup[] {
 
 export function applyGravity(grid: Grid): Set<Cell> {
     const moved = new Set<Cell>();
+    const rows = grid.length;
+    const cols = grid[0].length;
 
-    for (let col = 0; col < COLS; col += 1) {
-        let writeRow = ROWS - 1;
+    for (let col = 0; col < cols; col += 1) {
+        let writeRow = rows - 1;
 
-        for (let row = ROWS - 1; row >= 0; row -= 1) {
+        for (let row = rows - 1; row >= 0; row -= 1) {
             const cell = grid[row][col];
             if (!cell) continue;
 
