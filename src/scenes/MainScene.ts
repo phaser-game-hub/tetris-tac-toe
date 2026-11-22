@@ -42,6 +42,7 @@ export default class MainScene extends Phaser.Scene {
     private scoreText!: Phaser.GameObjects.Text;
     private levelText!: Phaser.GameObjects.Text;
     private linesText!: Phaser.GameObjects.Text;
+    private tasksText!: Phaser.GameObjects.Text;
     private overlay!: Phaser.GameObjects.Container;
     private overlayTitle!: Phaser.GameObjects.Text;
     private overlayHint!: Phaser.GameObjects.Text;
@@ -67,6 +68,7 @@ export default class MainScene extends Phaser.Scene {
     private displayScore: number | null = null;
     private displayLevel: number | null = null;
     private displayLines: number | null = null;
+    private displayCompletedTasks: number | null = null;
     private displayTask: TaskState | null = null;
 
     constructor() {
@@ -174,8 +176,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private drawPanels(): void {
-        this.panel(16, 96, 134, 250);
-        this.panel(16, 366, 134, 178);
+        this.panel(16, 96, 134, 300);
+        this.panel(16, 412, 134, 178);
         this.panel(570, 96, 134, 500);
         this.panel(570, 606, 134, 244);
 
@@ -204,14 +206,18 @@ export default class MainScene extends Phaser.Scene {
 
         this.add.text(32, 266, 'LINES', labelStyle);
         this.linesText = this.add.text(32, 284, '0', valueStyle);
+        this.divider(32, 318, 134);
 
-        this.add.text(32, 384, 'TIP', {
+        this.add.text(32, 330, 'TASKS', labelStyle);
+        this.tasksText = this.add.text(32, 348, '0', valueStyle);
+
+        this.add.text(32, 430, 'TIP', {
             fontFamily: FONT,
             fontSize: '14px',
             fontStyle: 'bold',
             color: '#ffd76a',
         });
-        this.add.text(32, 408, 'Собери 3 одинаковых символа в ряд, чтобы они исчезли.', {
+        this.add.text(32, 454, 'Собери 3 одинаковых символа в ряд, чтобы они исчезли.', {
             fontFamily: FONT,
             fontSize: '13px',
             color: MUTED_COLOR,
@@ -219,7 +225,7 @@ export default class MainScene extends Phaser.Scene {
             lineSpacing: 4,
         });
 
-        this.add.text(32, 502, 'Сначала прямые, потом диагонали.', {
+        this.add.text(32, 548, 'Сначала прямые, потом диагонали.', {
             fontFamily: FONT,
             fontSize: '11px',
             color: '#ffd76a',
@@ -481,7 +487,9 @@ export default class MainScene extends Phaser.Scene {
 
     private showGameOver(): void {
         this.overlayTitle.setText('GAME OVER');
-        this.overlayHint.setText(`Счёт: ${this.formatScore(this.state.score)}\nR или тап — заново`);
+        this.overlayHint.setText(
+            `Счёт: ${this.formatScore(this.state.score)}\nЗаданий выполнено: ${this.state.completedTasks}\nR или тап — заново`,
+        );
         this.overlay.setVisible(true);
     }
 
@@ -495,6 +503,7 @@ export default class MainScene extends Phaser.Scene {
         this.displayScore = null;
         this.displayLevel = null;
         this.displayLines = null;
+        this.displayCompletedTasks = null;
         this.displayTask = null;
         this.hideCombo();
         this.hideTaskToast();
@@ -526,6 +535,7 @@ export default class MainScene extends Phaser.Scene {
         this.displayScore = step.score;
         this.displayLevel = step.level;
         this.displayLines = step.lines;
+        this.displayCompletedTasks = step.completedTasks;
         this.displayTask = step.task;
         this.render();
         this.showCombo(step);
@@ -607,6 +617,7 @@ export default class MainScene extends Phaser.Scene {
         this.displayScore = null;
         this.displayLevel = null;
         this.displayLines = null;
+        this.displayCompletedTasks = null;
         this.displayTask = null;
         this.hideCombo();
         this.render();
@@ -680,6 +691,7 @@ export default class MainScene extends Phaser.Scene {
         this.scoreText.setText(this.formatScore(this.displayScore ?? this.state.score));
         this.levelText.setText(String(this.displayLevel ?? this.state.level));
         this.linesText.setText(String(this.displayLines ?? this.state.lines));
+        this.tasksText.setText(String(this.displayCompletedTasks ?? this.state.completedTasks));
         this.renderTask(this.displayTask ?? this.state.task);
         this.renderNext();
     }
