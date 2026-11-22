@@ -1,15 +1,18 @@
 import Phaser from 'phaser';
 import { Game } from '../game/Game';
 import type { ClearStep } from '../game/Game';
-import { COLS, ROWS } from '../game/model';
 import type { Grid, SymbolType } from '../game/model';
 import type { TaskCompletion, TaskState } from '../game/taskConfig';
 
-const CELL = 38;
+/**
+ * Стандартная рамка поля. Она не меняется с уровнем: в текущем конфиге
+ * количество клеток внутри уменьшается, поэтому сами клетки крупнее.
+ */
 const BOARD_X = 170;
 const BOARD_Y = 100;
-const BOARD_W = COLS * CELL;
-const BOARD_H = ROWS * CELL;
+const BOARD_W = 380;
+const BOARD_H = 760;
+const MIN_CELL = 10;
 
 const FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
 const TEXT_COLOR = '#f4f2ff';
@@ -37,8 +40,16 @@ const valueStyle: Phaser.Types.GameObjects.Text.TextStyle = {
 
 export default class MainScene extends Phaser.Scene {
     private state!: Game;
+    private boardGfx!: Phaser.GameObjects.Graphics;
     private tilesGfx!: Phaser.GameObjects.Graphics;
     private nextGfx!: Phaser.GameObjects.Graphics;
+    private cell = 38;
+    private gridX = BOARD_X;
+    private gridY = BOARD_Y;
+    private gridW = BOARD_W;
+    private gridH = BOARD_H;
+    private boardCols = 0;
+    private boardRows = 0;
     private scoreText!: Phaser.GameObjects.Text;
     private levelText!: Phaser.GameObjects.Text;
     private linesText!: Phaser.GameObjects.Text;
@@ -79,8 +90,9 @@ export default class MainScene extends Phaser.Scene {
         this.state = new Game();
 
         this.drawBackground();
-        this.drawBoard();
+        this.boardGfx = this.add.graphics();
         this.tilesGfx = this.add.graphics();
+        this.layoutBoard(this.state.cols, this.state.rows);
         this.drawPanels();
         this.createUi();
         this.createComboBadge();
@@ -108,7 +120,7 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private dropDelay(): number {
-        return Math.max(120, 800 - (this.state.level - 1) * 70);
+        return this.state.dropDelay;
     }
 
     private drawBackground(): void {
@@ -133,8 +145,28 @@ export default class MainScene extends Phaser.Scene {
         this.drawSymbol(deco, 700, 430, 22, 'X', 0.05);
     }
 
+    /**
+     * Пересчитывает размер клетки под текущее количество строк и колонок.
+     * Рамка поля при этом остаётся стандартной, а сетка центрируется
+     * внутри неё. Чем меньше клеток, тем крупнее каждая из них.
+     */
+    private layoutBoard(cols: number, rows: number): void {
+        if (cols === this.boardCols && rows === this.boardRows) return;
+
+        this.boardCols = cols;
+        this.boardRows = rows;
+        this.cell = Math.max(MIN_CELL, Math.min(BOARD_W / cols, BOARD_H / rows));
+        this.gridW = this.cell * cols;
+        this.gridH = this.cell * rows;
+        this.gridX = BOARD_X + (BOARD_W - this.gridW) / 2;
+        this.gridY = BOARD_Y + (BOARD_H - this.gridH) / 2;
+
+        this.drawBoard();
+    }
+
     private drawBoard(): void {
-        const g = this.add.graphics();
+        const g = this.boardGfx;
+        g.clear();
 
         for (let i = 6; i >= 1; i -= 1) {
             g.lineStyle(i * 3, PANEL_EDGE, 0.035);
@@ -148,11 +180,13 @@ export default class MainScene extends Phaser.Scene {
         g.fillRoundedRect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H, 12);
 
         g.lineStyle(1, 0xffffff, 0.05);
-        for (let col = 1; col < COLS; col += 1) {
-            g.lineBetween(BOARD_X + col * CELL, BOARD_Y, BOARD_X + col * CELL, BOARD_Y + BOARD_H);
+        for (let col = 1; col < this.boardCols; col += 1) {
+            const x = this.gridX + col * this.cell;
+            g.lineBetween(x, this.gridY, x, this.gridY + this.gridH);
         }
-        for (let row = 1; row < ROWS; row += 1) {
-            g.lineBetween(BOARD_X, BOARD_Y + row * CELL, BOARD_X + BOARD_W, BOARD_Y + row * CELL);
+        for (let row = 1; row < this.boardRows; row += 1) {
+            const y = this.gridY + row * this.cell;
+            g.lineBetween(this.gridX, y, this.gridX + this.gridW, y);
         }
 
         g.lineStyle(4, PANEL_EDGE, 0.9);
@@ -217,7 +251,7 @@ export default class MainScene extends Phaser.Scene {
             fontStyle: 'bold',
             color: '#ffd76a',
         });
-        this.add.text(32, 454, 'Собери 3 одинаковых символа в ряд, чтобы они исчезли.', {
+        this.add.text(32, 454, 'Собери 3 в ряд. С уровнем клеток меньше, а сами они крупнее.', {
             fontFamily: FONT,
             fontSize: '13px',
             color: MUTED_COLOR,
@@ -630,32 +664,40 @@ export default class MainScene extends Phaser.Scene {
         g.clear();
 
         const grid = this.displayGrid ?? this.state.grid;
+        const rows = grid.length;
+        const cols = grid[0].length;
 
-        for (let row = 0; row < ROWS; row += 1) {
-            for (let col = 0; col < COLS; col += 1) {
-                const cell = grid[row][col];
-                if (!cell) continue;
+        this.layoutBoard(cols, rows);
+
+        const cell = this.cell;
+
+        for (let row = 0; row < rows; row += 1) {
+            for (let col = 0; col < cols; col += 1) {
+                const tile = grid[row][col];
+                if (!tile) continue;
                 this.drawTile(
                     g,
-                    BOARD_X + col * CELL,
-                    BOARD_Y + row * CELL,
-                    CELL,
-                    cell.color,
-                    cell.symbol,
+                    this.gridX + col * cell,
+                    this.gridY + row * cell,
+                    cell,
+                    tile.color,
+                    tile.symbol,
                 );
             }
         }
 
         if (this.flashCells) {
+            const inset = Math.max(1, cell * 0.08);
             for (const key of this.flashCells) {
                 const [row, col] = key.split(',').map(Number);
-                const x = BOARD_X + col * CELL + 3;
-                const y = BOARD_Y + row * CELL + 3;
+                const x = this.gridX + col * cell + inset;
+                const y = this.gridY + row * cell + inset;
+                const size = cell - inset * 2;
 
                 g.fillStyle(0xffffff, 0.55);
-                g.fillRoundedRect(x, y, CELL - 6, CELL - 6, 8);
+                g.fillRoundedRect(x, y, size, size, Math.max(3, cell * 0.2));
                 g.lineStyle(3, 0xffffff, 0.95);
-                g.strokeRoundedRect(x, y, CELL - 6, CELL - 6, 8);
+                g.strokeRoundedRect(x, y, size, size, Math.max(3, cell * 0.2));
             }
         }
 
@@ -667,9 +709,9 @@ export default class MainScene extends Phaser.Scene {
                 for (const [r, c] of piece.cells) {
                     this.drawGhost(
                         g,
-                        BOARD_X + (piece.col + c) * CELL,
-                        BOARD_Y + (ghost + r) * CELL,
-                        CELL,
+                        this.gridX + (piece.col + c) * cell,
+                        this.gridY + (ghost + r) * cell,
+                        cell,
                         piece.color,
                         piece.symbol,
                     );
@@ -679,9 +721,9 @@ export default class MainScene extends Phaser.Scene {
             for (const [r, c] of piece.cells) {
                 this.drawTile(
                     g,
-                    BOARD_X + (piece.col + c) * CELL,
-                    BOARD_Y + (piece.row + r) * CELL,
-                    CELL,
+                    this.gridX + (piece.col + c) * cell,
+                    this.gridY + (piece.row + r) * cell,
+                    cell,
                     piece.color,
                     piece.symbol,
                 );
@@ -736,7 +778,8 @@ export default class MainScene extends Phaser.Scene {
         const g = this.nextGfx;
         g.clear();
 
-        const previewCell = 22;
+        // Превью повторяет размер клеток поля: с уровнем крупнее, но не более 22 px.
+        const previewCell = Math.max(11, Math.min(22, Math.round(this.cell * 0.58)));
         const slotW = 114;
         const slotH = 100;
 
@@ -767,9 +810,9 @@ export default class MainScene extends Phaser.Scene {
         color: number,
         symbol: SymbolType,
     ): void {
-        const pad = Math.max(2, size * 0.08);
+        const pad = Math.max(1.5, size * 0.08);
         const tile = size - pad * 2;
-        const radius = Math.max(5, size * 0.22);
+        const radius = Math.max(3, size * 0.22);
 
         g.fillStyle(0x000000, 0.28);
         g.fillRoundedRect(x + pad + 1, y + pad + 3, tile, tile, radius);
@@ -794,9 +837,9 @@ export default class MainScene extends Phaser.Scene {
         color: number,
         symbol: SymbolType,
     ): void {
-        const pad = Math.max(2, size * 0.08);
+        const pad = Math.max(1.5, size * 0.08);
         const tile = size - pad * 2;
-        const radius = Math.max(5, size * 0.22);
+        const radius = Math.max(3, size * 0.22);
 
         g.fillStyle(color, 0.1);
         g.fillRoundedRect(x + pad, y + pad, tile, tile, radius);
@@ -814,7 +857,7 @@ export default class MainScene extends Phaser.Scene {
         symbol: SymbolType,
         alpha = 1,
     ): void {
-        g.lineStyle(Math.max(2.5, radius * 0.62), 0xffffff, alpha);
+        g.lineStyle(Math.max(1.5, radius * 0.62), 0xffffff, alpha);
 
         if (symbol === 'X') {
             g.lineBetween(cx - radius, cy - radius, cx + radius, cy + radius);

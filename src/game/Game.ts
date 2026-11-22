@@ -1,10 +1,10 @@
 import type { Cell, Coord, Grid, MatchGroup, Piece, SymbolType } from './model';
 import { comboTierFor } from './comboConfig';
+import { LINES_PER_LEVEL, difficultyFor } from './difficultyConfig';
+import type { DifficultyTier } from './difficultyConfig';
 import { randomTask, taskMatchesLine } from './taskConfig';
 import type { TaskCompletion, TaskLine, TaskState } from './taskConfig';
 import {
-    COLS,
-    ROWS,
     applyGravity,
     createGrid,
     findMatchGroups,
@@ -48,9 +48,11 @@ export interface ClearStep {
 }
 
 export class Game {
-    readonly grid: Grid = createGrid();
+    grid: Grid;
     readonly queue: Piece[] = [];
 
+    cols: number;
+    rows: number;
     current: Piece | null = null;
     score = 0;
     level = 1;
@@ -60,10 +62,24 @@ export class Game {
     task: TaskState = { definition: randomTask(), progress: 0 };
 
     constructor() {
+        const tier = difficultyFor(this.level);
+        this.cols = tier.cols;
+        this.rows = tier.rows;
+        this.grid = createGrid(this.cols, this.rows);
+
         for (let i = 0; i < 4; i += 1) {
             this.queue.push(randomPiece());
         }
         this.spawn();
+    }
+
+    /** Текущие настройки сложности: размер поля и скорость падения. */
+    get difficulty(): DifficultyTier {
+        return difficultyFor(this.level);
+    }
+
+    get dropDelay(): number {
+        return this.difficulty.dropDelay;
     }
 
     move(direction: number): boolean {
@@ -149,7 +165,7 @@ export class Game {
             const targetRow = row + r;
             const targetCol = col + c;
 
-            if (targetCol < 0 || targetCol >= COLS || targetRow >= ROWS) {
+            if (targetCol < 0 || targetCol >= this.cols || targetRow >= this.rows) {
                 return true;
             }
             if (targetRow >= 0 && this.grid[targetRow][targetCol]) {
@@ -169,7 +185,7 @@ export class Game {
 
         this.queue.push(randomPiece());
         next.row = 0;
-        next.col = Math.floor((COLS - pieceWidth(next.cells)) / 2);
+        next.col = Math.floor((this.cols - pieceWidth(next.cells)) / 2);
         this.current = next;
 
         if (this.collides(next.row, next.col, next.cells)) {
@@ -186,7 +202,7 @@ export class Game {
         for (const [r, c] of piece.cells) {
             const row = piece.row + r;
             const col = piece.col + c;
-            if (row >= 0 && row < ROWS && col >= 0 && col < COLS) {
+            if (row >= 0 && row < this.rows && col >= 0 && col < this.cols) {
                 const cell: Cell = { symbol: piece.symbol, color: piece.color };
                 this.grid[row][col] = cell;
                 newCells.add(cell);
@@ -264,8 +280,8 @@ export class Game {
             const before = this.grid.map((row) => row.slice());
             const cleared: ClearedCell[] = [];
 
-            for (let row = 0; row < ROWS; row += 1) {
-                for (let col = 0; col < COLS; col += 1) {
+            for (let row = 0; row < this.rows; row += 1) {
+                for (let col = 0; col < this.cols; col += 1) {
                     const cell = this.grid[row][col];
                     if (cell && toClear.has(cell)) {
                         cleared.push({ row, col, symbol: cell.symbol, color: cell.color });
@@ -280,7 +296,8 @@ export class Game {
             const gained = base * tier.multiplier + bonus;
             this.score += gained;
             this.lines += groupsCleared;
-            this.level = 1 + Math.floor(this.lines / 10);
+            this.level = 1 + Math.floor(this.lines / LINES_PER_LEVEL);
+            this.applyDifficulty();
             const taskCompleted = this.advanceTask(matches);
 
             steps.push({
@@ -311,6 +328,50 @@ export class Game {
         }
 
         return steps;
+    }
+
+    /**
+     * Применяет настройки сложности текущего уровня. При изменении
+     * размера поля существующие клетки сохраняются: они остаются
+     * прижатыми к низу и центрируются по горизонтали. Клетки за новой
+     * границей отбрасываются. В текущем конфиге поле с уровнем меньше.
+     */
+    private applyDifficulty(): void {
+        const tier = this.difficulty;
+
+        if (tier.cols !== this.cols || tier.rows !== this.rows) {
+            this.resizeGrid(tier.cols, tier.rows);
+        }
+    }
+
+    private resizeGrid(cols: number, rows: number): void {
+        const next = createGrid(cols, rows);
+        const colOffset = Math.floor((cols - this.cols) / 2);
+        const rowOffset = rows - this.rows;
+
+        for (let row = 0; row < this.rows; row += 1) {
+            for (let col = 0; col < this.cols; col += 1) {
+                const cell = this.grid[row][col];
+                if (!cell) continue;
+
+                const targetRow = row + rowOffset;
+                const targetCol = col + colOffset;
+
+                if (targetRow >= 0 && targetRow < rows && targetCol >= 0 && targetCol < cols) {
+                    next[targetRow][targetCol] = cell;
+                }
+            }
+        }
+
+        this.grid = next;
+        this.cols = cols;
+        this.rows = rows;
+
+        if (this.current) {
+            const maxCol = Math.max(0, cols - pieceWidth(this.current.cells));
+            this.current.col = Math.min(Math.max(0, this.current.col + colOffset), maxCol);
+            this.current.row = Math.min(Math.max(0, this.current.row + rowOffset), rows - 1);
+        }
     }
 
     /**
