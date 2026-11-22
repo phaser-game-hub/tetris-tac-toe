@@ -1,0 +1,24 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 20%, #353a8c 0%, #232568 55%, #1a1b4d 100%);
+    -webkit-tap-highlight-color: transparent;
+}
+
+#game-container {
+    width: 100%;
+    height: 100%;
+}
+
+#game-container canvas {
+    display: block;
+    touch-action: none;
+}
