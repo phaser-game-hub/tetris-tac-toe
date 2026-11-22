@@ -37,6 +37,8 @@ export interface ClearStep {
     score: number;
     level: number;
     lines: number;
+    /** Количество выполненных заданий после этого шага. */
+    completedTasks: number;
     /** Линии, очищенные на этом шаге. */
     matches: TaskLine[];
     /** Состояние задания после этого шага. */
@@ -53,6 +55,7 @@ export class Game {
     score = 0;
     level = 1;
     lines = 0;
+    completedTasks = 0;
     gameOver = false;
     task: TaskState = { definition: randomTask(), progress: 0 };
 
@@ -294,6 +297,7 @@ export class Game {
                 score: this.score,
                 level: this.level,
                 lines: this.lines,
+                completedTasks: this.completedTasks,
                 matches,
                 task: { definition: this.task.definition, progress: this.task.progress },
                 taskCompleted,
@@ -329,6 +333,7 @@ export class Game {
         };
 
         this.score += completion.reward;
+        this.completedTasks += 1;
         this.task = { definition: randomTask(completion.definition.id), progress: 0 };
 
         return completion;
