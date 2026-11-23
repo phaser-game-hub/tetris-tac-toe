@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { Game } from '../game/Game';
 import type { ClearStep } from '../game/Game';
+import { loadBestScore, saveBestScore } from '../game/bestScore';
 import type { Grid, SymbolType } from '../game/model';
 import type { TaskCompletion, TaskState } from '../game/taskConfig';
 
@@ -51,9 +52,13 @@ export default class MainScene extends Phaser.Scene {
     private boardCols = 0;
     private boardRows = 0;
     private scoreText!: Phaser.GameObjects.Text;
+    private bestText!: Phaser.GameObjects.Text;
     private levelText!: Phaser.GameObjects.Text;
     private linesText!: Phaser.GameObjects.Text;
     private tasksText!: Phaser.GameObjects.Text;
+    private destroyedXText!: Phaser.GameObjects.Text;
+    private destroyedOText!: Phaser.GameObjects.Text;
+    private bestScore = 0;
     private overlay!: Phaser.GameObjects.Container;
     private overlayTitle!: Phaser.GameObjects.Text;
     private overlayHint!: Phaser.GameObjects.Text;
@@ -67,6 +72,17 @@ export default class MainScene extends Phaser.Scene {
     private taskProgressGfx!: Phaser.GameObjects.Graphics;
     private taskToast!: Phaser.GameObjects.Container;
     private taskToastReward!: Phaser.GameObjects.Text;
+    private recordPopup!: Phaser.GameObjects.Container;
+    private recordPopupScore!: Phaser.GameObjects.Text;
+    private fireworkEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+    private fireworksTimer?: Phaser.Time.TimerEvent;
+    private levelPopup!: Phaser.GameObjects.Container;
+    private levelPopupTitle!: Phaser.GameObjects.Text;
+    private levelPopupHint!: Phaser.GameObjects.Text;
+    private levelPopupTimer?: Phaser.Time.TimerEvent;
+    private levelUpEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+    private levelUpLoop = 0;
+    private levelUpActive = false;
 
     private paused = false;
     private dropAcc = 0;
@@ -80,6 +96,8 @@ export default class MainScene extends Phaser.Scene {
     private displayLevel: number | null = null;
     private displayLines: number | null = null;
     private displayCompletedTasks: number | null = null;
+    private displayDestroyedX: number | null = null;
+    private displayDestroyedO: number | null = null;
     private displayTask: TaskState | null = null;
 
     constructor() {
@@ -88,6 +106,7 @@ export default class MainScene extends Phaser.Scene {
 
     create(): void {
         this.state = new Game();
+        this.bestScore = loadBestScore();
 
         this.drawBackground();
         this.boardGfx = this.add.graphics();
@@ -100,6 +119,8 @@ export default class MainScene extends Phaser.Scene {
         this.nextGfx = this.add.graphics();
         this.createButtons();
         this.createOverlay();
+        this.createRecordCelebration();
+        this.createLevelCelebration();
         this.bindKeys();
         this.render();
     }
@@ -210,8 +231,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private drawPanels(): void {
-        this.panel(16, 96, 134, 300);
-        this.panel(16, 412, 134, 178);
+        this.panel(16, 96, 134, 374);
+        this.panel(16, 486, 134, 178);
         this.panel(570, 96, 134, 500);
         this.panel(570, 606, 134, 244);
 
@@ -232,26 +253,43 @@ export default class MainScene extends Phaser.Scene {
 
         this.add.text(32, 112, 'SCORE', labelStyle);
         this.scoreText = this.add.text(32, 130, '0', valueStyle);
-        this.divider(32, 176, 134);
+        this.divider(32, 164, 134);
 
-        this.add.text(32, 190, 'LEVEL', labelStyle);
-        this.levelText = this.add.text(32, 208, '1', valueStyle);
-        this.divider(32, 252, 134);
+        this.add.text(32, 170, 'BEST', labelStyle);
+        this.bestText = this.add.text(32, 188, '0', valueStyle);
+        this.divider(32, 222, 134);
 
-        this.add.text(32, 266, 'LINES', labelStyle);
-        this.linesText = this.add.text(32, 284, '0', valueStyle);
-        this.divider(32, 318, 134);
+        this.add.text(32, 228, 'LEVEL', labelStyle);
+        this.levelText = this.add.text(32, 246, '1', valueStyle);
+        this.divider(32, 280, 134);
 
-        this.add.text(32, 330, 'TASKS', labelStyle);
-        this.tasksText = this.add.text(32, 348, '0', valueStyle);
+        this.add.text(32, 286, 'LINES', labelStyle);
+        this.linesText = this.add.text(32, 304, '0', valueStyle);
+        this.divider(32, 338, 134);
 
-        this.add.text(32, 430, 'TIP', {
+        this.add.text(32, 344, 'TASKS', labelStyle);
+        this.tasksText = this.add.text(32, 362, '0', valueStyle);
+        this.divider(32, 396, 134);
+
+        this.add.text(32, 402, 'DESTROYED', labelStyle);
+        this.destroyedXText = this.add.text(32, 420, 'X 0', {
+            ...valueStyle,
+            fontSize: '18px',
+            color: '#9cc4ff',
+        });
+        this.destroyedOText = this.add.text(92, 420, 'O 0', {
+            ...valueStyle,
+            fontSize: '18px',
+            color: '#ffb26b',
+        });
+
+        this.add.text(32, 504, 'TIP', {
             fontFamily: FONT,
             fontSize: '14px',
             fontStyle: 'bold',
             color: '#ffd76a',
         });
-        this.add.text(32, 454, 'Собери 3 в ряд. С уровнем клеток меньше, а сами они крупнее.', {
+        this.add.text(32, 528, 'Собери 3 в ряд. С уровнем клеток меньше, а сами они крупнее.', {
             fontFamily: FONT,
             fontSize: '13px',
             color: MUTED_COLOR,
@@ -259,7 +297,7 @@ export default class MainScene extends Phaser.Scene {
             lineSpacing: 4,
         });
 
-        this.add.text(32, 548, 'Сначала прямые, потом диагонали.', {
+        this.add.text(32, 606, 'Сначала прямые, потом диагонали.', {
             fontFamily: FONT,
             fontSize: '11px',
             color: '#ffd76a',
@@ -458,6 +496,232 @@ export default class MainScene extends Phaser.Scene {
         });
     }
 
+    private createRecordCelebration(): void {
+        this.createFireworkTexture();
+
+        const bg = this.add.graphics();
+        bg.fillStyle(0x14173f, 0.96);
+        bg.fillRoundedRect(-190, -62, 380, 124, 26);
+        bg.lineStyle(3, 0xffd76a, 0.95);
+        bg.strokeRoundedRect(-190, -62, 380, 124, 26);
+        bg.lineStyle(1, 0xffffff, 0.18);
+        bg.strokeRoundedRect(-185, -57, 370, 114, 23);
+
+        const title = this.add.text(0, -30, 'НОВЫЙ РЕКОРД!', {
+            fontFamily: FONT,
+            fontSize: '30px',
+            fontStyle: 'bold',
+            color: '#ffd76a',
+        }).setOrigin(0.5);
+
+        this.recordPopupScore = this.add.text(0, 20, '', {
+            fontFamily: FONT,
+            fontSize: '28px',
+            fontStyle: 'bold',
+            color: TEXT_COLOR,
+        }).setOrigin(0.5);
+
+        this.recordPopup = this.add.container(360, 300, [bg, title, this.recordPopupScore]);
+        this.recordPopup.setDepth(120).setVisible(false);
+
+        this.fireworkEmitter = this.add.particles(0, 0, 'firework-spark', {
+            lifespan: { min: 700, max: 1300 },
+            speed: { min: 100, max: 320 },
+            scale: { start: 0.9, end: 0 },
+            alpha: { start: 1, end: 0 },
+            gravityY: 140,
+            blendMode: 'ADD',
+            emitting: false,
+        });
+        this.fireworkEmitter.setDepth(105);
+    }
+
+    /**
+     * Мягкая светящаяся точка для частиц фейерверка. Текстура рисуется
+     * кодом, поэтому игра не зависит от загрузки внешних ресурсов.
+     */
+    private createFireworkTexture(): void {
+        const key = 'firework-spark';
+        if (this.textures.exists(key)) return;
+
+        const g = this.make.graphics({}, false);
+        g.fillStyle(0xffffff, 0.22);
+        g.fillCircle(8, 8, 8);
+        g.fillStyle(0xffffff, 0.55);
+        g.fillCircle(8, 8, 5.5);
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(8, 8, 3);
+        g.generateTexture(key, 16, 16);
+        g.destroy();
+    }
+
+    private showRecordCelebration(): void {
+        this.recordPopupScore.setText(this.formatScore(this.bestScore));
+
+        this.tweens.killTweensOf(this.recordPopup);
+        this.recordPopup.setVisible(true).setAlpha(1).setScale(0.75);
+
+        this.tweens.add({
+            targets: this.recordPopup,
+            scale: 1,
+            duration: 320,
+            ease: 'Back.Out',
+        });
+        this.tweens.add({
+            targets: this.recordPopup,
+            alpha: 0.82,
+            delay: 400,
+            duration: 750,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.InOut',
+        });
+
+        this.startFireworks();
+    }
+
+    private startFireworks(): void {
+        this.fireworksTimer?.remove(false);
+
+        const colors = [0xffd76a, 0xff6b8a, 0x9cc4ff, 0x7cffb2, 0xffffff];
+        const burst = () => {
+            this.fireworkEmitter.setParticleTint(
+                colors[Phaser.Math.Between(0, colors.length - 1)],
+            );
+            this.fireworkEmitter.explode(
+                Phaser.Math.Between(34, 56),
+                Phaser.Math.Between(205, 515),
+                Phaser.Math.Between(180, 470),
+            );
+        };
+
+        burst();
+        this.fireworksTimer = this.time.addEvent({
+            delay: 420,
+            repeat: 7,
+            callback: burst,
+        });
+    }
+
+    private hideRecordCelebration(): void {
+        this.fireworksTimer?.remove(false);
+        this.fireworksTimer = undefined;
+        this.fireworkEmitter.killAll();
+
+        this.tweens.killTweensOf(this.recordPopup);
+        this.recordPopup.setVisible(false).setAlpha(1).setScale(1);
+    }
+
+    private createLevelCelebration(): void {
+        this.createFireworkTexture();
+
+        const bg = this.add.graphics();
+        bg.fillStyle(0x14173f, 0.95);
+        bg.fillRoundedRect(-190, -50, 380, 100, 22);
+        bg.lineStyle(3, 0x9cc4ff, 0.95);
+        bg.strokeRoundedRect(-190, -50, 380, 100, 22);
+        bg.lineStyle(1, 0xffffff, 0.16);
+        bg.strokeRoundedRect(-185, -45, 370, 90, 19);
+
+        this.levelPopupTitle = this.add.text(0, -22, '', {
+            fontFamily: FONT,
+            fontSize: '28px',
+            fontStyle: 'bold',
+            color: '#9cc4ff',
+        }).setOrigin(0.5);
+
+        this.levelPopupHint = this.add.text(0, 20, '', {
+            fontFamily: FONT,
+            fontSize: '14px',
+            fontStyle: 'bold',
+            color: TEXT_COLOR,
+            align: 'center',
+            wordWrap: { width: 330 },
+            lineSpacing: 3,
+        }).setOrigin(0.5);
+
+        this.levelPopup = this.add.container(360, 158, [
+            bg,
+            this.levelPopupTitle,
+            this.levelPopupHint,
+        ]);
+        this.levelPopup.setDepth(70).setVisible(false);
+
+        this.levelUpEmitter = this.add.particles(360, 480, 'firework-spark', {
+            blendMode: 'ADD',
+            lifespan: 900,
+            frequency: 18,
+            scale: { start: 1.1, end: 0.05 },
+            alpha: { start: 1, end: 0 },
+            tint: [0x9cc4ff, 0xffd76a, 0xff9ab8, 0x7cffb2],
+            stopAfter: 64,
+            emitting: false,
+        });
+        this.levelUpEmitter.addEmitZone({
+            type: 'edge',
+            source: new Phaser.Geom.Rectangle(-190, -380, 380, 760),
+            quantity: 64,
+        });
+        this.levelUpEmitter.setDepth(45);
+        this.levelUpEmitter.on('complete', () => {
+            if (!this.levelUpActive) return;
+
+            this.levelUpLoop += 1;
+
+            if (this.levelUpLoop < 2) {
+                this.levelUpEmitter.start();
+            } else {
+                this.levelUpActive = false;
+            }
+        });
+    }
+
+    private showLevelCelebration(level: number, fieldChanged: boolean): void {
+        this.levelPopupTitle.setText(`УРОВЕНЬ ${level}`);
+        this.levelPopupHint.setText(
+            fieldChanged
+                ? 'Сложность выросла — поле стало меньше'
+                : 'Сложность выросла',
+        );
+
+        this.levelPopupTimer?.remove(false);
+        this.tweens.killTweensOf(this.levelPopup);
+        this.levelPopup.setVisible(true).setAlpha(1).setScale(0.78);
+
+        this.tweens.add({
+            targets: this.levelPopup,
+            scale: 1,
+            duration: 300,
+            ease: 'Back.Out',
+        });
+
+        this.levelUpActive = true;
+        this.levelUpLoop = 0;
+        this.levelUpEmitter.stop(true);
+        this.levelUpEmitter.killAll();
+        this.levelUpEmitter.start();
+
+        this.levelPopupTimer = this.time.delayedCall(2700, () => {
+            this.tweens.add({
+                targets: this.levelPopup,
+                alpha: 0,
+                duration: 250,
+                onComplete: () => this.levelPopup.setVisible(false).setAlpha(1),
+            });
+        });
+    }
+
+    private hideLevelCelebration(): void {
+        this.levelPopupTimer?.remove(false);
+        this.levelPopupTimer = undefined;
+        this.levelUpActive = false;
+        this.levelUpEmitter.stop(true);
+        this.levelUpEmitter.killAll();
+
+        this.tweens.killTweensOf(this.levelPopup);
+        this.levelPopup.setVisible(false).setAlpha(1).setScale(1);
+    }
+
     private bindKeys(): void {
         const keyboard = this.input.keyboard;
         if (!keyboard) return;
@@ -520,14 +784,36 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private showGameOver(): void {
+        const newRecord = this.recordBest();
+
+        this.hideLevelCelebration();
         this.overlayTitle.setText('GAME OVER');
         this.overlayHint.setText(
-            `Счёт: ${this.formatScore(this.state.score)}\nЗаданий выполнено: ${this.state.completedTasks}\nR или тап — заново`,
+            `Счёт: ${this.formatScore(this.state.score)}\nРекорд: ${this.formatScore(this.bestScore)}\nЗаданий выполнено: ${this.state.completedTasks}\nR или тап — заново`,
         );
         this.overlay.setVisible(true);
+
+        if (newRecord) this.showRecordCelebration();
+    }
+
+    /**
+     * Запоминает лучший счёт завершённой сессии. Рекорд обновляется,
+     * только когда текущая игра его превысила, и сохраняется в localStorage.
+     * Возвращает true, если рекорд был побит.
+     */
+    private recordBest(): boolean {
+        if (this.state.score <= this.bestScore) return false;
+
+        this.bestScore = this.state.score;
+        saveBestScore(this.bestScore);
+        this.bestText.setText(this.formatScore(this.bestScore));
+        return true;
     }
 
     private restart(): void {
+        this.recordBest();
+        this.hideRecordCelebration();
+        this.hideLevelCelebration();
         this.clearTimer?.remove();
         this.clearTimer = undefined;
         this.resolving = false;
@@ -538,6 +824,8 @@ export default class MainScene extends Phaser.Scene {
         this.displayLevel = null;
         this.displayLines = null;
         this.displayCompletedTasks = null;
+        this.displayDestroyedX = null;
+        this.displayDestroyedO = null;
         this.displayTask = null;
         this.hideCombo();
         this.hideTaskToast();
@@ -570,9 +858,15 @@ export default class MainScene extends Phaser.Scene {
         this.displayLevel = step.level;
         this.displayLines = step.lines;
         this.displayCompletedTasks = step.completedTasks;
+        this.displayDestroyedX = step.destroyedX;
+        this.displayDestroyedO = step.destroyedO;
         this.displayTask = step.task;
         this.render();
         this.showCombo(step);
+
+        if (step.levelUp) {
+            this.showLevelCelebration(step.level, step.fieldChanged);
+        }
 
         if (step.taskCompleted) {
             this.showTaskComplete(step.taskCompleted);
@@ -652,6 +946,8 @@ export default class MainScene extends Phaser.Scene {
         this.displayLevel = null;
         this.displayLines = null;
         this.displayCompletedTasks = null;
+        this.displayDestroyedX = null;
+        this.displayDestroyedO = null;
         this.displayTask = null;
         this.hideCombo();
         this.render();
@@ -731,9 +1027,16 @@ export default class MainScene extends Phaser.Scene {
         }
 
         this.scoreText.setText(this.formatScore(this.displayScore ?? this.state.score));
+        this.bestText.setText(this.formatScore(this.bestScore));
         this.levelText.setText(String(this.displayLevel ?? this.state.level));
         this.linesText.setText(String(this.displayLines ?? this.state.lines));
         this.tasksText.setText(String(this.displayCompletedTasks ?? this.state.completedTasks));
+        this.destroyedXText.setText(
+            `X ${this.formatScore(this.displayDestroyedX ?? this.state.destroyedX)}`,
+        );
+        this.destroyedOText.setText(
+            `O ${this.formatScore(this.displayDestroyedO ?? this.state.destroyedO)}`,
+        );
         this.renderTask(this.displayTask ?? this.state.task);
         this.renderNext();
     }
@@ -778,10 +1081,12 @@ export default class MainScene extends Phaser.Scene {
         const g = this.nextGfx;
         g.clear();
 
-        // Превью повторяет размер клеток поля: с уровнем крупнее, но не более 22 px.
-        const previewCell = Math.max(11, Math.min(22, Math.round(this.cell * 0.58)));
         const slotW = 114;
         const slotH = 100;
+
+        // Превью использует тот же размер клетки, что и поле, без уменьшения.
+        // Ограничение нужно только для того, чтобы фигура не выходила за слот.
+        const previewCell = Math.min(this.cell, slotW / 4, slotH / 2);
 
         this.state.queue.forEach((piece, index) => {
             const width = (Math.max(...piece.cells.map(([, col]) => col)) + 1) * previewCell;
