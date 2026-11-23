@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { Game } from '../game/Game';
-import type { ClearStep } from '../game/Game';
+import type { ClearStep, ClearedCell } from '../game/Game';
 import { loadBestScore, saveBestScore } from '../game/bestScore';
 import type { Grid, SymbolType } from '../game/model';
 import type { TaskCompletion, TaskState } from '../game/taskConfig';
@@ -90,6 +90,10 @@ export default class MainScene extends Phaser.Scene {
     private resolving = false;
     private displayGrid: Grid | null = null;
     private flashCells: Set<string> | null = null;
+    private clearGlowGfx!: Phaser.GameObjects.Graphics;
+    private clearGlowFx: Phaser.Filters.Glow | null = null;
+    private clearGlowTween?: Phaser.Tweens.Tween;
+    private clearEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
     private clearSteps: ClearStep[] = [];
     private clearTimer?: Phaser.Time.TimerEvent;
     private displayScore: number | null = null;
@@ -111,6 +115,7 @@ export default class MainScene extends Phaser.Scene {
         this.drawBackground();
         this.boardGfx = this.add.graphics();
         this.tilesGfx = this.add.graphics();
+        this.createClearEffects();
         this.layoutBoard(this.state.cols, this.state.rows);
         this.drawPanels();
         this.createUi();
@@ -555,6 +560,57 @@ export default class MainScene extends Phaser.Scene {
         g.destroy();
     }
 
+    /**
+     * Создаёт эффекты очистки линий: отдельный слой с glow-фильтром для
+     * пульсирующего свечения и эмиттер для разлетающихся осколков.
+     * Свечение живёт на своём Graphics, чтобы не подсвечивать всё поле.
+     */
+    private createClearEffects(): void {
+        this.createClearSparkTexture();
+
+        this.clearGlowGfx = this.add.graphics();
+        this.clearGlowGfx.setDepth(2);
+        this.clearGlowGfx.enableFilters();
+        this.clearGlowFx =
+            this.clearGlowGfx.filters?.external.addGlow(0xfff2b0, 0, 0, 1, false, 10, 24) ??
+            null;
+
+        if (this.clearGlowFx) this.clearGlowFx.active = false;
+
+        this.clearEmitter = this.add.particles(0, 0, 'clear-spark', {
+            lifespan: { min: 380, max: 720 },
+            speed: { min: 100, max: 300 },
+            angle: { min: 0, max: 360 },
+            gravityY: 720,
+            scale: { start: 0.85, end: 0 },
+            alpha: { start: 1, end: 0 },
+            rotate: { min: -220, max: 220 },
+            tint: [0x9cc4ff, 0x8b6cf0, 0xffb26b, 0xf2649a, 0xfff2b0],
+            blendMode: 'ADD',
+            emitting: false,
+        });
+        this.clearEmitter.setDepth(30);
+    }
+
+    /**
+     * Осколок для взрыва клеток: маленький светящийся квадрат,
+     * который тонируется в цвета фигур.
+     */
+    private createClearSparkTexture(): void {
+        const key = 'clear-spark';
+        if (this.textures.exists(key)) return;
+
+        const g = this.make.graphics({}, false);
+        g.fillStyle(0xffffff, 0.18);
+        g.fillCircle(8, 8, 8);
+        g.fillStyle(0xffffff, 0.55);
+        g.fillRoundedRect(3.5, 3.5, 9, 9, 2.5);
+        g.fillStyle(0xffffff, 1);
+        g.fillRoundedRect(5, 5, 6, 6, 1.5);
+        g.generateTexture(key, 16, 16);
+        g.destroy();
+    }
+
     private showRecordCelebration(): void {
         this.recordPopupScore.setText(this.formatScore(this.bestScore));
 
@@ -816,6 +872,8 @@ export default class MainScene extends Phaser.Scene {
         this.hideLevelCelebration();
         this.clearTimer?.remove();
         this.clearTimer = undefined;
+        this.stopClearGlow();
+        this.clearEmitter.killAll();
         this.resolving = false;
         this.displayGrid = null;
         this.flashCells = null;
@@ -863,6 +921,7 @@ export default class MainScene extends Phaser.Scene {
         this.displayTask = step.task;
         this.render();
         this.showCombo(step);
+        this.startClearGlow();
 
         if (step.levelUp) {
             this.showLevelCelebration(step.level, step.fieldChanged);
@@ -872,16 +931,76 @@ export default class MainScene extends Phaser.Scene {
             this.showTaskComplete(step.taskCompleted);
         }
 
-        const hold = step.combo >= 2 ? 420 : 300;
+        const hold = step.combo >= 2 ? 520 : 380;
 
         this.clearTimer?.remove();
         this.clearTimer = this.time.delayedCall(hold, () => {
+            this.explodeClear(step.cleared);
+
             if (index + 1 < this.clearSteps.length) {
                 this.showClearStep(index + 1);
             } else {
                 this.finishClear();
             }
         });
+    }
+
+    /**
+     * Пульсирующее свечение очищаемых клеток: сила glow-фильтра
+     * плавно ходит туда-обратно, пока клетки ещё видны.
+     */
+    private startClearGlow(): void {
+        const fx = this.clearGlowFx;
+        if (!fx) return;
+
+        this.clearGlowTween?.remove();
+        fx.active = true;
+        fx.outerStrength = 2;
+        fx.innerStrength = 0;
+
+        this.clearGlowTween = this.tweens.add({
+            targets: fx,
+            outerStrength: 13,
+            innerStrength: 1.6,
+            duration: 180,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.InOut',
+        });
+    }
+
+    private stopClearGlow(): void {
+        this.clearGlowTween?.remove();
+        this.clearGlowTween = undefined;
+
+        const fx = this.clearGlowFx;
+        if (!fx) return;
+
+        fx.active = false;
+        fx.outerStrength = 0;
+        fx.innerStrength = 0;
+    }
+
+    /**
+     * Взрыв очищенных клеток: из центра каждой клетки разлетаются
+     * частицы, а камера коротко вздрагивает.
+     */
+    private explodeClear(cells: ClearedCell[]): void {
+        this.stopClearGlow();
+
+        if (cells.length === 0) return;
+
+        const cell = this.cell;
+
+        for (const { row, col } of cells) {
+            this.clearEmitter.explode(
+                Phaser.Math.Between(6, 10),
+                this.gridX + (col + 0.5) * cell,
+                this.gridY + (row + 0.5) * cell,
+            );
+        }
+
+        this.cameras.main.shake(220, 0.012, true);
     }
 
     private showCombo(step: ClearStep): void {
@@ -938,6 +1057,7 @@ export default class MainScene extends Phaser.Scene {
 
     private finishClear(): void {
         this.clearTimer = undefined;
+        this.stopClearGlow();
         this.resolving = false;
         this.displayGrid = null;
         this.flashCells = null;
@@ -982,20 +1102,7 @@ export default class MainScene extends Phaser.Scene {
             }
         }
 
-        if (this.flashCells) {
-            const inset = Math.max(1, cell * 0.08);
-            for (const key of this.flashCells) {
-                const [row, col] = key.split(',').map(Number);
-                const x = this.gridX + col * cell + inset;
-                const y = this.gridY + row * cell + inset;
-                const size = cell - inset * 2;
-
-                g.fillStyle(0xffffff, 0.55);
-                g.fillRoundedRect(x, y, size, size, Math.max(3, cell * 0.2));
-                g.lineStyle(3, 0xffffff, 0.95);
-                g.strokeRoundedRect(x, y, size, size, Math.max(3, cell * 0.2));
-            }
-        }
+        this.renderClearHighlight(grid);
 
         const piece = this.resolving ? null : this.state.current;
         if (piece) {
@@ -1039,6 +1146,36 @@ export default class MainScene extends Phaser.Scene {
         );
         this.renderTask(this.displayTask ?? this.state.task);
         this.renderNext();
+    }
+
+    /**
+     * Рисует подложку под glow-фильтр: клетки сохраняют свой цвет,
+     * а белая обводка и лёгкая заливка создают источник свечения.
+     */
+    private renderClearHighlight(grid: Grid): void {
+        const g = this.clearGlowGfx;
+        g.clear();
+
+        if (!this.flashCells) return;
+
+        const cell = this.cell;
+        const inset = Math.max(1, cell * 0.08);
+        const radius = Math.max(3, cell * 0.2);
+
+        for (const key of this.flashCells) {
+            const [row, col] = key.split(',').map(Number);
+            const x = this.gridX + col * cell + inset;
+            const y = this.gridY + row * cell + inset;
+            const size = cell - inset * 2;
+            const color = grid[row]?.[col]?.color ?? 0xffffff;
+
+            g.fillStyle(color, 0.38);
+            g.fillRoundedRect(x, y, size, size, radius);
+            g.fillStyle(0xffffff, 0.16);
+            g.fillRoundedRect(x + 2, y + 2, size - 4, size * 0.4, radius * 0.7);
+            g.lineStyle(Math.max(2, cell * 0.07), 0xffffff, 0.95);
+            g.strokeRoundedRect(x, y, size, size, radius);
+        }
     }
 
     private renderTask(task: TaskState): void {
