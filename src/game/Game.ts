@@ -37,6 +37,14 @@ export interface ClearStep {
     score: number;
     level: number;
     lines: number;
+    /** Уровень повысился на этом шаге. */
+    levelUp: boolean;
+    /** Размер поля уменьшился на этом шаге. */
+    fieldChanged: boolean;
+    /** Количество уничтоженных крестиков после этого шага. */
+    destroyedX: number;
+    /** Количество уничтоженных ноликов после этого шага. */
+    destroyedO: number;
     /** Количество выполненных заданий после этого шага. */
     completedTasks: number;
     /** Линии, очищенные на этом шаге. */
@@ -57,6 +65,8 @@ export class Game {
     score = 0;
     level = 1;
     lines = 0;
+    destroyedX = 0;
+    destroyedO = 0;
     completedTasks = 0;
     gameOver = false;
     task: TaskState = { definition: randomTask(), progress: 0 };
@@ -286,6 +296,12 @@ export class Game {
                     if (cell && toClear.has(cell)) {
                         cleared.push({ row, col, symbol: cell.symbol, color: cell.color });
                         this.grid[row][col] = null;
+
+                        if (cell.symbol === 'X') {
+                            this.destroyedX += 1;
+                        } else {
+                            this.destroyedO += 1;
+                        }
                     }
                 }
             }
@@ -296,8 +312,9 @@ export class Game {
             const gained = base * tier.multiplier + bonus;
             this.score += gained;
             this.lines += groupsCleared;
+            const previousLevel = this.level;
             this.level = 1 + Math.floor(this.lines / LINES_PER_LEVEL);
-            this.applyDifficulty();
+            const fieldChanged = this.applyDifficulty();
             const taskCompleted = this.advanceTask(matches);
 
             steps.push({
@@ -314,6 +331,10 @@ export class Game {
                 score: this.score,
                 level: this.level,
                 lines: this.lines,
+                levelUp: this.level > previousLevel,
+                fieldChanged,
+                destroyedX: this.destroyedX,
+                destroyedO: this.destroyedO,
                 completedTasks: this.completedTasks,
                 matches,
                 task: { definition: this.task.definition, progress: this.task.progress },
@@ -336,12 +357,15 @@ export class Game {
      * прижатыми к низу и центрируются по горизонтали. Клетки за новой
      * границей отбрасываются. В текущем конфиге поле с уровнем меньше.
      */
-    private applyDifficulty(): void {
+    private applyDifficulty(): boolean {
         const tier = this.difficulty;
 
         if (tier.cols !== this.cols || tier.rows !== this.rows) {
             this.resizeGrid(tier.cols, tier.rows);
+            return true;
         }
+
+        return false;
     }
 
     private resizeGrid(cols: number, rows: number): void {
