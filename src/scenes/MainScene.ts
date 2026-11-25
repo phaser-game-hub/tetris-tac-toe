@@ -82,9 +82,10 @@ export default class MainScene extends Phaser.Scene {
     private levelPopupTitle!: Phaser.GameObjects.Text;
     private levelPopupHint!: Phaser.GameObjects.Text;
     private levelPopupTimer?: Phaser.Time.TimerEvent;
-    private levelUpEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
-    private levelUpLoop = 0;
-    private levelUpActive = false;
+    private levelGlowGfx!: Phaser.GameObjects.Graphics;
+    private levelGlowFx: Phaser.Filters.Glow | null = null;
+    private levelGlowTween?: Phaser.Tweens.Tween;
+    private levelGlowFadeTween?: Phaser.Tweens.Tween;
 
     private music?: Phaser.Sound.BaseSound;
     private lastLockedPieces = 0;
@@ -98,7 +99,8 @@ export default class MainScene extends Phaser.Scene {
     private clearGlowGfx!: Phaser.GameObjects.Graphics;
     private clearGlowFx: Phaser.Filters.Glow | null = null;
     private clearGlowTween?: Phaser.Tweens.Tween;
-    private clearEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+    private clearCircleEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+    private clearCrossEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
     private clearSteps: ClearStep[] = [];
     private clearTimer?: Phaser.Time.TimerEvent;
     private displayScore: number | null = null;
@@ -603,52 +605,77 @@ export default class MainScene extends Phaser.Scene {
 
     /**
      * Создаёт эффекты очистки линий: отдельный слой с glow-фильтром для
-     * пульсирующего свечения и эмиттер для разлетающихся осколков.
+     * пульсирующего свечения и эмиттеры для разлетающихся символов.
      * Свечение живёт на своём Graphics, чтобы не подсвечивать всё поле.
      */
     private createClearEffects(): void {
-        this.createClearSparkTexture();
+        this.createClearSparkTextures();
 
         this.clearGlowGfx = this.add.graphics();
         this.clearGlowGfx.setDepth(2);
         this.clearGlowGfx.enableFilters();
         this.clearGlowFx =
-            this.clearGlowGfx.filters?.external.addGlow(0xfff2b0, 0, 0, 1, false, 10, 24) ??
+            this.clearGlowGfx.filters?.external.addGlow(0xfff2b0, 0, 0, 0.125, false, 10, 24) ??
             null;
 
         if (this.clearGlowFx) this.clearGlowFx.active = false;
 
-        this.clearEmitter = this.add.particles(0, 0, 'clear-spark', {
-            lifespan: { min: 380, max: 720 },
-            speed: { min: 100, max: 300 },
-            angle: { min: 0, max: 360 },
-            gravityY: 720,
-            scale: { start: 0.85, end: 0 },
-            alpha: { start: 1, end: 0 },
-            rotate: { min: -220, max: 220 },
-            tint: [0x9cc4ff, 0x8b6cf0, 0xffb26b, 0xf2649a, 0xfff2b0],
-            blendMode: 'ADD',
-            emitting: false,
-        });
-        this.clearEmitter.setDepth(30);
+        this.clearCircleEmitter = this.createClearEmitter('clear-spark-circle', 0xffb26b);
+        this.clearCrossEmitter = this.createClearEmitter('clear-spark-cross', 0x9cc4ff);
     }
 
     /**
-     * Осколок для взрыва клеток: маленький светящийся квадрат,
-     * который тонируется в цвета фигур.
+     * Частицы очистки повторяют символы поля: для O летят кольца,
+     * для X — крестики. Цвета берутся из палитры соответствующих фигур.
      */
-    private createClearSparkTexture(): void {
-        const key = 'clear-spark';
+    private createClearEmitter(
+        texture: string,
+        tint: number,
+    ): Phaser.GameObjects.Particles.ParticleEmitter {
+        const emitter = this.add.particles(0, 0, texture, {
+            lifespan: { min: 320, max: 620 },
+            speed: { min: 90, max: 260 },
+            angle: { min: 0, max: 360 },
+            gravityY: 720,
+            scale: { start: 3.0, end: 0.15 },
+            alpha: { start: 1, end: 0 },
+            rotate: { min: -200, max: 200 },
+            tint,
+            blendMode: 'ADD',
+            emitting: false,
+        });
+        emitter.setDepth(30);
+
+        return emitter;
+    }
+
+    /**
+     * Создаёт две текстуры осколков: кольцо и крестик. Они белые,
+     * а цвет задаётся тонировкой эмиттера.
+     */
+    private createClearSparkTextures(): void {
+        this.createClearSparkTexture('clear-spark-circle', 'O');
+        this.createClearSparkTexture('clear-spark-cross', 'X');
+    }
+
+    private createClearSparkTexture(key: string, symbol: SymbolType): void {
         if (this.textures.exists(key)) return;
 
         const g = this.make.graphics({}, false);
-        g.fillStyle(0xffffff, 0.18);
-        g.fillCircle(8, 8, 8);
-        g.fillStyle(0xffffff, 0.55);
-        g.fillRoundedRect(3.5, 3.5, 9, 9, 2.5);
-        g.fillStyle(0xffffff, 1);
-        g.fillRoundedRect(5, 5, 6, 6, 1.5);
-        g.generateTexture(key, 16, 16);
+        g.fillStyle(0xffffff, 0.14);
+        g.fillCircle(10, 10, 9);
+        g.fillStyle(0xffffff, 0.3);
+        g.fillCircle(10, 10, 6.5);
+        g.lineStyle(2.6, 0xffffff, 1);
+
+        if (symbol === 'X') {
+            g.lineBetween(4.5, 4.5, 15.5, 15.5);
+            g.lineBetween(15.5, 4.5, 4.5, 15.5);
+        } else {
+            g.strokeCircle(10, 10, 5);
+        }
+
+        g.generateTexture(key, 20, 20);
         g.destroy();
     }
 
@@ -744,33 +771,88 @@ export default class MainScene extends Phaser.Scene {
         ]);
         this.levelPopup.setDepth(70).setVisible(false);
 
-        this.levelUpEmitter = this.add.particles(360, 480, 'firework-spark', {
-            blendMode: 'ADD',
-            lifespan: 900,
-            frequency: 18,
-            scale: { start: 1.1, end: 0.05 },
-            alpha: { start: 1, end: 0 },
-            tint: [0x9cc4ff, 0xffd76a, 0xff9ab8, 0x7cffb2],
-            stopAfter: 64,
-            emitting: false,
-        });
-        this.levelUpEmitter.addEmitZone({
-            type: 'edge',
-            source: new Phaser.Geom.Rectangle(-190, -380, 380, 760),
-            quantity: 64,
-        });
-        this.levelUpEmitter.setDepth(45);
-        this.levelUpEmitter.on('complete', () => {
-            if (!this.levelUpActive) return;
+        this.createLevelFieldGlow();
+    }
 
-            this.levelUpLoop += 1;
+    /**
+     * Bloom-выделение поля при повышении уровня: светящаяся рамка
+     * вместо кольца частиц вокруг поля.
+     */
+    private createLevelFieldGlow(): void {
+        this.levelGlowGfx = this.add.graphics();
+        this.levelGlowGfx.setDepth(3);
+        this.levelGlowGfx.enableFilters();
+        this.levelGlowFx =
+            this.levelGlowGfx.filters?.external.addGlow(0x9cc4ff, 0, 0, 0.25, false, 10, 26) ??
+            null;
 
-            if (this.levelUpLoop < 2) {
-                this.levelUpEmitter.start();
-            } else {
-                this.levelUpActive = false;
-            }
+        if (this.levelGlowFx) this.levelGlowFx.active = false;
+
+        const x = BOARD_X - 7;
+        const y = BOARD_Y - 7;
+        const w = BOARD_W + 14;
+        const h = BOARD_H + 14;
+
+        this.levelGlowGfx.lineStyle(12, 0x9cc4ff, 0.12);
+        this.levelGlowGfx.strokeRoundedRect(x - 3, y - 3, w + 6, h + 6, 21);
+        this.levelGlowGfx.lineStyle(6, 0x9cc4ff, 0.9);
+        this.levelGlowGfx.strokeRoundedRect(x, y, w, h, 18);
+        this.levelGlowGfx.lineStyle(2, 0xffffff, 0.95);
+        this.levelGlowGfx.strokeRoundedRect(x + 3, y + 3, w - 6, h - 6, 15);
+        this.levelGlowGfx.setAlpha(0);
+    }
+
+    private startLevelFieldGlow(): void {
+        const fx = this.levelGlowFx;
+        if (!fx) return;
+
+        this.stopLevelFieldGlow();
+
+        fx.active = true;
+        fx.outerStrength = 2;
+        fx.innerStrength = 0;
+        this.levelGlowGfx.setAlpha(1);
+
+        this.levelGlowTween = this.tweens.add({
+            targets: fx,
+            outerStrength: 18,
+            innerStrength: 0.125,
+            duration: 420,
+            yoyo: true,
+            repeat: 1,
+            ease: 'Sine.InOut',
+            onComplete: () => {
+                this.levelGlowTween = undefined;
+                this.levelGlowFadeTween = this.tweens.add({
+                    targets: this.levelGlowGfx,
+                    alpha: 0,
+                    duration: 420,
+                    onComplete: () => {
+                        this.levelGlowFadeTween = undefined;
+                        this.deactivateLevelFieldGlow();
+                    },
+                });
+            },
         });
+    }
+
+    private stopLevelFieldGlow(): void {
+        this.levelGlowTween?.remove();
+        this.levelGlowTween = undefined;
+        this.levelGlowFadeTween?.remove();
+        this.levelGlowFadeTween = undefined;
+        this.deactivateLevelFieldGlow();
+    }
+
+    private deactivateLevelFieldGlow(): void {
+        const fx = this.levelGlowFx;
+        if (fx) {
+            fx.active = false;
+            fx.outerStrength = 0;
+            fx.innerStrength = 0;
+        }
+
+        this.levelGlowGfx?.setAlpha(0);
     }
 
     private showLevelCelebration(level: number, fieldChanged: boolean): void {
@@ -794,11 +876,7 @@ export default class MainScene extends Phaser.Scene {
             ease: 'Back.Out',
         });
 
-        this.levelUpActive = true;
-        this.levelUpLoop = 0;
-        this.levelUpEmitter.stop(true);
-        this.levelUpEmitter.killAll();
-        this.levelUpEmitter.start();
+        this.startLevelFieldGlow();
 
         this.levelPopupTimer = this.time.delayedCall(2700, () => {
             this.tweens.add({
@@ -813,9 +891,7 @@ export default class MainScene extends Phaser.Scene {
     private hideLevelCelebration(): void {
         this.levelPopupTimer?.remove(false);
         this.levelPopupTimer = undefined;
-        this.levelUpActive = false;
-        this.levelUpEmitter.stop(true);
-        this.levelUpEmitter.killAll();
+        this.stopLevelFieldGlow();
 
         this.tweens.killTweensOf(this.levelPopup);
         this.levelPopup.setVisible(false).setAlpha(1).setScale(1);
@@ -920,7 +996,8 @@ export default class MainScene extends Phaser.Scene {
         this.clearTimer?.remove();
         this.clearTimer = undefined;
         this.stopClearGlow();
-        this.clearEmitter.killAll();
+        this.clearCircleEmitter.killAll();
+        this.clearCrossEmitter.killAll();
         this.resolving = false;
         this.displayGrid = null;
         this.flashCells = null;
@@ -1036,26 +1113,34 @@ export default class MainScene extends Phaser.Scene {
 
     /**
      * Взрыв очищенных клеток: из центра каждой клетки разлетаются
-     * частицы, а камера коротко вздрагивает.
+     * частицы-символы, а камера коротко вздрагивает.
      */
     private explodeClear(cells: ClearedCell[]): void {
         this.stopClearGlow();
 
-        if (cells.length === 0) return;
+        if (!cells.length) return;
 
         this.playSound('cellDestroy');
 
         const cell = this.cell;
+        const { gridX, gridY, clearCrossEmitter, clearCircleEmitter } = this;
 
-        for (const { row, col } of cells) {
-            this.clearEmitter.explode(
-                Phaser.Math.Between(6, 10),
-                this.gridX + (col + 0.5) * cell,
-                this.gridY + (row + 0.5) * cell,
-            );
+        for (const { row, col, symbol } of cells) {
+            const count = Phaser.Math.Between(3, 5);
+            const crossCount = Math.ceil(count / 2);
+
+            const x = gridX + (col + 0.5) * cell;
+            const y = gridY + (row + 0.5) * cell;
+
+            const isCross = symbol === 'X';
+
+            const emitter = isCross ? clearCrossEmitter : clearCircleEmitter;
+            const particleCount = isCross ? crossCount : count - crossCount;
+
+            emitter.explode(particleCount, x, y);
         }
 
-        this.cameras.main.shake(220, 0.012, true);
+        this.cameras.main.shake(110, 0.012, true);
     }
 
     private showCombo(step: ClearStep): void {
