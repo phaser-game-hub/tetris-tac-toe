@@ -68,6 +68,8 @@ export class Game {
     destroyedX = 0;
     destroyedO = 0;
     completedTasks = 0;
+    /** Сколько фигур уже приземлилось и зафиксировалось на поле. */
+    piecesLocked = 0;
     gameOver = false;
     task: TaskState = { definition: randomTask(), progress: 0 };
 
@@ -220,6 +222,7 @@ export class Game {
         }
 
         this.current = null;
+        this.piecesLocked += 1;
         const steps = this.resolve(newCells);
         this.spawn();
         return steps;

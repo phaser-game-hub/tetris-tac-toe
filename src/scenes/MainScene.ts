@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { Game } from '../game/Game';
 import type { ClearStep, ClearedCell } from '../game/Game';
+import { MUSIC_CONFIG, SOUND_CONFIG, audioUrl } from '../game/audioConfig';
+import type { SoundKey } from '../game/audioConfig';
 import { loadBestScore, saveBestScore } from '../game/bestScore';
 import type { Grid, SymbolType } from '../game/model';
 import type { TaskCompletion, TaskState } from '../game/taskConfig';
@@ -84,6 +86,9 @@ export default class MainScene extends Phaser.Scene {
     private levelUpLoop = 0;
     private levelUpActive = false;
 
+    private music?: Phaser.Sound.BaseSound;
+    private lastLockedPieces = 0;
+
     private paused = false;
     private dropAcc = 0;
 
@@ -108,10 +113,21 @@ export default class MainScene extends Phaser.Scene {
         super('MainScene');
     }
 
+    preload(): void {
+        (Object.keys(SOUND_CONFIG) as SoundKey[]).forEach((key) => {
+            this.load.audio(key, audioUrl(SOUND_CONFIG[key].file));
+        });
+
+        if (MUSIC_CONFIG.volume > 0) {
+            this.load.audio('music', audioUrl(MUSIC_CONFIG.file));
+        }
+    }
+
     create(): void {
         this.state = new Game();
         this.bestScore = loadBestScore();
 
+        this.startMusic();
         this.drawBackground();
         this.boardGfx = this.add.graphics();
         this.tilesGfx = this.add.graphics();
@@ -147,6 +163,31 @@ export default class MainScene extends Phaser.Scene {
 
     private dropDelay(): number {
         return this.state.dropDelay;
+    }
+
+    /**
+     * Запускает фоновую музыку. Если браузер блокирует автовоспроизведение,
+     * Phaser включит её после первого касания или нажатия клавиши.
+     */
+    private startMusic(): void {
+        if (MUSIC_CONFIG.volume <= 0) return;
+
+        this.music?.stop();
+        this.music = this.sound.add('music', {
+            loop: MUSIC_CONFIG.loop,
+            volume: MUSIC_CONFIG.volume,
+        });
+        this.music.play();
+    }
+
+    private playSound(key: SoundKey): void {
+        const config = SOUND_CONFIG[key];
+        if (config.volume <= 0) return;
+
+        this.sound.play(key, {
+            volume: config.volume,
+            rate: config.rate ?? 1,
+        });
     }
 
     private drawBackground(): void {
@@ -733,6 +774,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private showLevelCelebration(level: number, fieldChanged: boolean): void {
+        this.playSound('levelUp');
+
         this.levelPopupTitle.setText(`УРОВЕНЬ ${level}`);
         this.levelPopupHint.setText(
             fieldChanged
@@ -849,6 +892,8 @@ export default class MainScene extends Phaser.Scene {
         );
         this.overlay.setVisible(true);
 
+        this.playSound(newRecord ? 'victory' : 'defeat');
+
         if (newRecord) this.showRecordCelebration();
     }
 
@@ -868,6 +913,8 @@ export default class MainScene extends Phaser.Scene {
 
     private restart(): void {
         this.recordBest();
+        this.sound.stopByKey('victory');
+        this.sound.stopByKey('defeat');
         this.hideRecordCelebration();
         this.hideLevelCelebration();
         this.clearTimer?.remove();
@@ -889,6 +936,7 @@ export default class MainScene extends Phaser.Scene {
         this.hideTaskToast();
 
         this.state = new Game();
+        this.lastLockedPieces = 0;
         this.paused = false;
         this.dropAcc = 0;
         this.overlay.setVisible(false);
@@ -896,6 +944,11 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private handleSteps(steps: ClearStep[]): void {
+        if (this.state.piecesLocked !== this.lastLockedPieces) {
+            this.lastLockedPieces = this.state.piecesLocked;
+            this.playSound('pieceFall');
+        }
+
         if (steps.length === 0) {
             this.render();
             if (this.state.gameOver) this.showGameOver();
@@ -990,6 +1043,8 @@ export default class MainScene extends Phaser.Scene {
 
         if (cells.length === 0) return;
 
+        this.playSound('cellDestroy');
+
         const cell = this.cell;
 
         for (const { row, col } of cells) {
@@ -1031,6 +1086,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private showTaskComplete(completion: TaskCompletion): void {
+        this.playSound('taskComplete');
+
         this.taskToastReward.setText(`+${completion.reward}`);
 
         this.tweens.killTweensOf(this.taskToast);
