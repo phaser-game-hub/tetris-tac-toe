@@ -89,6 +89,45 @@ export const TASK_CONFIG: TaskDefinition[] = [
 
 Прогресс задания увеличивается, когда на поле очищается подходящая линия. После достижения `target` начисляется `reward`, показывается плашка «ЗАДАНИЕ ВЫПОЛНЕНО» и выбирается новое задание. Чтобы добавить своё задание, достаточно дописать объект в `TASK_CONFIG`.
 
+## Настройка звука
+
+Все игровые звуки и фоновая музыка задаются в `src/game/audioConfig.ts`. Сами файлы лежат в `public/audio`, поэтому попадают в сборку и не зависят от папки `storage_assets`:
+
+```ts
+export const SOUND_CONFIG: Record<SoundKey, SoundDefinition> = {
+    cellDestroy: { file: 'audio/sfx/cell-destroy.wav', volume: 0.5 },
+    levelUp: { file: 'audio/sfx/level-up.wav', volume: 0.7 },
+    taskComplete: { file: 'audio/sfx/task-complete.wav', volume: 0.7 },
+    pieceFall: { file: 'audio/sfx/piece-fall.wav', volume: 0.35 },
+    victory: { file: 'audio/sfx/victory.wav', volume: 0.8 },
+    defeat: { file: 'audio/sfx/defeat.wav', volume: 0.8 },
+};
+
+export const MUSIC_CONFIG: MusicDefinition = {
+    file: 'audio/music/background.wav',
+    volume: 0.18,
+    loop: true,
+};
+```
+
+| Событие | Ключ | Текущий файл |
+| --- | --- | --- |
+| Уничтожение клеток при очистке линии | `cellDestroy` | `audio/sfx/cell-destroy.wav` |
+| Повышение уровня | `levelUp` | `audio/sfx/level-up.wav` |
+| Выполнение задания | `taskComplete` | `audio/sfx/task-complete.wav` |
+| Приземление и фиксация фигуры | `pieceFall` | `audio/sfx/piece-fall.wav` |
+| Победа (новый рекорд) | `victory` | `audio/sfx/victory.wav` |
+| Поражение (без нового рекорда) | `defeat` | `audio/sfx/defeat.wav` |
+
+| Поле | Что задаёт |
+| --- | --- |
+| `file` | Путь к WAV-файлу относительно `public` |
+| `volume` | Громкость от 0 до 1; `0` полностью отключает звук |
+| `rate` | Скорость и тон воспроизведения (необязательно, `1` — как в файле) |
+| `loop` | Зацикливать ли фоновую музыку |
+
+Чтобы заменить звук, положите новый файл в `public/audio/sfx` (или `public/audio/music`) и укажите его имя в конфиге. Формат — WAV PCM. Фоновая музыка включается сразу после первого касания или нажатия клавиши, если браузер блокирует автовоспроизведение. Победа проигрывается при завершении игры с новым рекордом, поражение — при завершении без рекорда.
+
 ## Настройка сложности
 
 Количество клеток и скорость падения по уровням задаются в `src/game/difficultyConfig.ts`:
@@ -139,6 +178,8 @@ export const DIFFICULTY_CONFIG: DifficultyTier[] = [
 - `src/game/difficultyConfig.ts` — размер поля и скорость падения по уровням.
 - `src/game/comboConfig.ts` — пороги, названия и награды плашек комбо.
 - `src/game/taskConfig.ts` — список заданий, случайный выбор и проверка прогресса.
+- `src/game/audioConfig.ts` — звуки игровых событий, фоновая музыка и громкость.
+- `public/audio` — WAV-файлы звуков и музыки, на которые ссылается конфиг.
 - `src/game/bestScore.ts` — загрузка и сохранение лучшего счёта между сессиями.
 - `src/game/Game.ts` — состояние игры: спавн, движение, блокировка, очистка, задания, счёт.
 - `src/scenes/MainScene.ts` — отрисовка интерфейса и поля, динамическая вёрстка сетки внутри рамки, размер клеток и превью, уведомления о рекорде и новом уровне с частицами, пульсирующее свечение и взрыв очищаемых клеток с тряской камеры, ввод, игровой цикл.
