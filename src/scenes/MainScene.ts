@@ -17,6 +17,9 @@ const BOARD_W = 380;
 const BOARD_H = 760;
 const MIN_CELL = 10;
 
+/** Запас вокруг тайла в текстуре, чтобы не обрезалась тень. */
+const TILE_MARGIN = 3;
+
 const FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
 const TEXT_COLOR = '#f4f2ff';
 const MUTED_COLOR = '#b9b4e8';
@@ -44,8 +47,11 @@ const valueStyle: Phaser.Types.GameObjects.Text.TextStyle = {
 export default class MainScene extends Phaser.Scene {
     private state!: Game;
     private boardGfx!: Phaser.GameObjects.Graphics;
-    private tilesGfx!: Phaser.GameObjects.Graphics;
-    private nextGfx!: Phaser.GameObjects.Graphics;
+    private tilePool: Phaser.GameObjects.Image[] = [];
+    private ghostPool: Phaser.GameObjects.Image[] = [];
+    private piecePool: Phaser.GameObjects.Image[] = [];
+    private nextPool: Phaser.GameObjects.Image[] = [];
+    private taskTitleColor = '';
     private cell = 38;
     private gridX = BOARD_X;
     private gridY = BOARD_Y;
@@ -83,7 +89,6 @@ export default class MainScene extends Phaser.Scene {
     private levelPopupHint!: Phaser.GameObjects.Text;
     private levelPopupTimer?: Phaser.Time.TimerEvent;
     private levelGlowGfx!: Phaser.GameObjects.Graphics;
-    private levelGlowFx: Phaser.Filters.Glow | null = null;
     private levelGlowTween?: Phaser.Tweens.Tween;
     private levelGlowFadeTween?: Phaser.Tweens.Tween;
 
@@ -97,7 +102,6 @@ export default class MainScene extends Phaser.Scene {
     private displayGrid: Grid | null = null;
     private flashCells: Set<string> | null = null;
     private clearGlowGfx!: Phaser.GameObjects.Graphics;
-    private clearGlowFx: Phaser.Filters.Glow | null = null;
     private clearGlowTween?: Phaser.Tweens.Tween;
     private clearCircleEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
     private clearCrossEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -132,14 +136,12 @@ export default class MainScene extends Phaser.Scene {
         this.startMusic();
         this.drawBackground();
         this.boardGfx = this.add.graphics();
-        this.tilesGfx = this.add.graphics();
         this.createClearEffects();
         this.layoutBoard(this.state.cols, this.state.rows);
         this.drawPanels();
         this.createUi();
         this.createComboBadge();
         this.createTaskToast();
-        this.nextGfx = this.add.graphics();
         this.createButtons();
         this.createOverlay();
         this.createRecordCelebration();
@@ -613,12 +615,7 @@ export default class MainScene extends Phaser.Scene {
 
         this.clearGlowGfx = this.add.graphics();
         this.clearGlowGfx.setDepth(2);
-        this.clearGlowGfx.enableFilters();
-        this.clearGlowFx =
-            this.clearGlowGfx.filters?.external.addGlow(0xfff2b0, 0, 0, 0.125, false, 10, 24) ??
-            null;
-
-        if (this.clearGlowFx) this.clearGlowFx.active = false;
+        this.clearGlowGfx.setVisible(false);
 
         this.clearCircleEmitter = this.createClearEmitter('clear-spark-circle', 0xffb26b);
         this.clearCrossEmitter = this.createClearEmitter('clear-spark-cross', 0x9cc4ff);
@@ -637,7 +634,7 @@ export default class MainScene extends Phaser.Scene {
             speed: { min: 90, max: 260 },
             angle: { min: 0, max: 360 },
             gravityY: 720,
-            scale: { start: 3.0, end: 0.15 },
+            scale: { start: 2.0, end: 0.15 },
             alpha: { start: 1, end: 0 },
             rotate: { min: -200, max: 200 },
             tint,
@@ -781,12 +778,6 @@ export default class MainScene extends Phaser.Scene {
     private createLevelFieldGlow(): void {
         this.levelGlowGfx = this.add.graphics();
         this.levelGlowGfx.setDepth(3);
-        this.levelGlowGfx.enableFilters();
-        this.levelGlowFx =
-            this.levelGlowGfx.filters?.external.addGlow(0x9cc4ff, 0, 0, 0.25, false, 10, 26) ??
-            null;
-
-        if (this.levelGlowFx) this.levelGlowFx.active = false;
 
         const x = BOARD_X - 7;
         const y = BOARD_Y - 7;
@@ -803,20 +794,14 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private startLevelFieldGlow(): void {
-        const fx = this.levelGlowFx;
-        if (!fx) return;
-
         this.stopLevelFieldGlow();
 
-        fx.active = true;
-        fx.outerStrength = 2;
-        fx.innerStrength = 0;
-        this.levelGlowGfx.setAlpha(1);
+        // Без шейдерного фильтра: рамка пульсирует прозрачностью, потом гаснет.
+        this.levelGlowGfx.setAlpha(0.45);
 
         this.levelGlowTween = this.tweens.add({
-            targets: fx,
-            outerStrength: 18,
-            innerStrength: 0.125,
+            targets: this.levelGlowGfx,
+            alpha: 1,
             duration: 420,
             yoyo: true,
             repeat: 1,
@@ -845,13 +830,6 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private deactivateLevelFieldGlow(): void {
-        const fx = this.levelGlowFx;
-        if (fx) {
-            fx.active = false;
-            fx.outerStrength = 0;
-            fx.innerStrength = 0;
-        }
-
         this.levelGlowGfx?.setAlpha(0);
     }
 
@@ -1076,22 +1054,16 @@ export default class MainScene extends Phaser.Scene {
     }
 
     /**
-     * Пульсирующее свечение очищаемых клеток: сила glow-фильтра
-     * плавно ходит туда-обратно, пока клетки ещё видны.
+     * Пульсация подсветки очищаемых клеток: прозрачность плавно ходит
+     * туда-обратно, пока клетки ещё видны. Шейдерный фильтр не используется.
      */
     private startClearGlow(): void {
-        const fx = this.clearGlowFx;
-        if (!fx) return;
-
         this.clearGlowTween?.remove();
-        fx.active = true;
-        fx.outerStrength = 2;
-        fx.innerStrength = 0;
 
+        this.clearGlowGfx.setAlpha(0.55);
         this.clearGlowTween = this.tweens.add({
-            targets: fx,
-            outerStrength: 13,
-            innerStrength: 1.6,
+            targets: this.clearGlowGfx,
+            alpha: 1,
             duration: 180,
             yoyo: true,
             repeat: -1,
@@ -1102,13 +1074,7 @@ export default class MainScene extends Phaser.Scene {
     private stopClearGlow(): void {
         this.clearGlowTween?.remove();
         this.clearGlowTween = undefined;
-
-        const fx = this.clearGlowFx;
-        if (!fx) return;
-
-        fx.active = false;
-        fx.outerStrength = 0;
-        fx.innerStrength = 0;
+        this.clearGlowGfx?.setAlpha(1);
     }
 
     /**
@@ -1126,7 +1092,7 @@ export default class MainScene extends Phaser.Scene {
         const { gridX, gridY, clearCrossEmitter, clearCircleEmitter } = this;
 
         for (const { row, col, symbol } of cells) {
-            const count = Phaser.Math.Between(3, 5);
+            const count = Phaser.Math.Between(2, 4);
             const crossCount = Math.ceil(count / 2);
 
             const x = gridX + (col + 0.5) * cell;
@@ -1218,9 +1184,6 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private render(): void {
-        const g = this.tilesGfx;
-        g.clear();
-
         const grid = this.displayGrid ?? this.state.grid;
         const rows = grid.length;
         const cols = grid[0].length;
@@ -1229,51 +1192,51 @@ export default class MainScene extends Phaser.Scene {
 
         const cell = this.cell;
 
+        let tilesUsed = 0;
         for (let row = 0; row < rows; row += 1) {
             for (let col = 0; col < cols; col += 1) {
                 const tile = grid[row][col];
                 if (!tile) continue;
-                this.drawTile(
-                    g,
+                this.placeTile(
+                    this.tilePool, tilesUsed, 1, 'tile', tile.symbol, tile.color, cell,
                     this.gridX + col * cell,
                     this.gridY + row * cell,
-                    cell,
-                    tile.color,
-                    tile.symbol,
                 );
+                tilesUsed += 1;
             }
         }
+        this.hideUnused(this.tilePool, tilesUsed);
 
         this.renderClearHighlight(grid);
 
+        let ghostUsed = 0;
+        let pieceUsed = 0;
         const piece = this.resolving ? null : this.state.current;
         if (piece) {
             const ghost = this.state.ghostRow();
 
             if (ghost !== piece.row) {
                 for (const [r, c] of piece.cells) {
-                    this.drawGhost(
-                        g,
+                    this.placeTile(
+                        this.ghostPool, ghostUsed, 1.1, 'ghost', piece.symbol, piece.color, cell,
                         this.gridX + (piece.col + c) * cell,
                         this.gridY + (ghost + r) * cell,
-                        cell,
-                        piece.color,
-                        piece.symbol,
                     );
+                    ghostUsed += 1;
                 }
             }
 
             for (const [r, c] of piece.cells) {
-                this.drawTile(
-                    g,
+                this.placeTile(
+                    this.piecePool, pieceUsed, 1.2, 'tile', piece.symbol, piece.color, cell,
                     this.gridX + (piece.col + c) * cell,
                     this.gridY + (piece.row + r) * cell,
-                    cell,
-                    piece.color,
-                    piece.symbol,
                 );
+                pieceUsed += 1;
             }
         }
+        this.hideUnused(this.ghostPool, ghostUsed);
+        this.hideUnused(this.piecePool, pieceUsed);
 
         this.scoreText.setText(this.formatScore(this.displayScore ?? this.state.score));
         this.bestText.setText(this.formatScore(this.bestScore));
@@ -1297,6 +1260,7 @@ export default class MainScene extends Phaser.Scene {
     private renderClearHighlight(grid: Grid): void {
         const g = this.clearGlowGfx;
         g.clear();
+        g.setVisible(this.flashCells !== null);
 
         if (!this.flashCells) return;
 
@@ -1329,7 +1293,12 @@ export default class MainScene extends Phaser.Scene {
                   ? '#ffb26b'
                   : '#ffd76a';
 
-        this.taskTitle.setText(definition.title).setColor(titleColor);
+        this.taskTitle.setText(definition.title);
+        if (this.taskTitleColor !== titleColor) {
+            // setColor перерисовывает текстуру текста, поэтому только при смене.
+            this.taskTitleColor = titleColor;
+            this.taskTitle.setColor(titleColor);
+        }
         this.taskDescription.setText(definition.description);
         this.taskProgressText.setText(
             `${Math.min(task.progress, definition.target)} / ${definition.target}`,
@@ -1357,9 +1326,6 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private renderNext(): void {
-        const g = this.nextGfx;
-        g.clear();
-
         const slotW = 114;
         const slotH = 100;
 
@@ -1367,6 +1333,7 @@ export default class MainScene extends Phaser.Scene {
         // Ограничение нужно только для того, чтобы фигура не выходила за слот.
         const previewCell = Math.min(this.cell, slotW / 4, slotH / 2);
 
+        let used = 0;
         this.state.queue.forEach((piece, index) => {
             const width = (Math.max(...piece.cells.map(([, col]) => col)) + 1) * previewCell;
             const height = (Math.max(...piece.cells.map(([row]) => row)) + 1) * previewCell;
@@ -1374,16 +1341,76 @@ export default class MainScene extends Phaser.Scene {
             const originY = 146 + index * 110 + (slotH - height) / 2;
 
             for (const [r, c] of piece.cells) {
-                this.drawTile(
-                    g,
+                this.placeTile(
+                    this.nextPool, used, 1, 'tile', piece.symbol, piece.color, previewCell,
                     originX + c * previewCell,
                     originY + r * previewCell,
-                    previewCell,
-                    piece.color,
-                    piece.symbol,
                 );
+                used += 1;
             }
         });
+        this.hideUnused(this.nextPool, used);
+    }
+
+    /**
+     * Тайл рисуется в текстуру один раз для сочетания (вид, символ, цвет,
+     * размер клетки). Дальше на поле лежат обычные Image: Phaser батчит их
+     * и не триангулирует скруглённые прямоугольники заново каждый кадр.
+     */
+    private tileTexture(
+        kind: 'tile' | 'ghost',
+        symbol: SymbolType,
+        color: number,
+        size: number,
+    ): string {
+        const key = `${kind}-${symbol}-${color}-${size.toFixed(2)}`;
+        if (this.textures.exists(key)) return key;
+
+        const texSize = Math.ceil(size) + TILE_MARGIN * 2;
+        const g = this.make.graphics({}, false);
+
+        if (kind === 'tile') {
+            this.drawTile(g, TILE_MARGIN, TILE_MARGIN, size, color, symbol);
+        } else {
+            this.drawGhost(g, TILE_MARGIN, TILE_MARGIN, size, color, symbol);
+        }
+
+        g.generateTexture(key, texSize, texSize);
+        g.destroy();
+
+        return key;
+    }
+
+    private placeTile(
+        pool: Phaser.GameObjects.Image[],
+        index: number,
+        depth: number,
+        kind: 'tile' | 'ghost',
+        symbol: SymbolType,
+        color: number,
+        size: number,
+        x: number,
+        y: number,
+    ): void {
+        const key = this.tileTexture(kind, symbol, color, size);
+        let image = pool[index];
+
+        if (!image) {
+            image = this.add.image(0, 0, key).setOrigin(0, 0).setDepth(depth);
+            pool[index] = image;
+        } else if (image.texture.key !== key) {
+            image.setTexture(key);
+        }
+
+        image
+            .setPosition(Math.round(x) - TILE_MARGIN, Math.round(y) - TILE_MARGIN)
+            .setVisible(true);
+    }
+
+    private hideUnused(pool: Phaser.GameObjects.Image[], used: number): void {
+        for (let i = used; i < pool.length; i += 1) {
+            pool[i].setVisible(false);
+        }
     }
 
     private drawTile(
