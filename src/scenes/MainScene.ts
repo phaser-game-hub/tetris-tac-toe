@@ -20,7 +20,13 @@ const MIN_CELL = 10;
 /** Запас вокруг тайла в текстуре, чтобы не обрезалась тень. */
 const TILE_MARGIN = 3;
 
-const FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
+const LOGO_KEY = 'logo';
+const LOGO_FILE = 'img/tet_tac_toe_logo_128.png';
+const LOGO_SIZE = 160;
+
+const STAT_PANEL_OFFSET_Y = 120;
+
+const FONT = '"Baloo", "Trebuchet MS", "Segoe UI", system-ui, sans-serif';
 const TEXT_COLOR = '#f4f2ff';
 const MUTED_COLOR = '#b9b4e8';
 
@@ -120,6 +126,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     preload(): void {
+        this.load.image(LOGO_KEY, `${import.meta.env.BASE_URL}${LOGO_FILE}`);
+
         (Object.keys(SOUND_CONFIG) as SoundKey[]).forEach((key) => {
             this.load.audio(key, audioUrl(SOUND_CONFIG[key].file));
         });
@@ -281,8 +289,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private drawPanels(): void {
-        this.panel(16, 96, 134, 374);
-        this.panel(16, 486, 134, 178);
+        this.panel(16, 96 + STAT_PANEL_OFFSET_Y, 134, 374);
+        this.panel(16, 486 + STAT_PANEL_OFFSET_Y, 134, 178);
         this.panel(570, 96, 134, 500);
         this.panel(570, 606, 134, 244);
 
@@ -296,50 +304,47 @@ export default class MainScene extends Phaser.Scene {
     }
 
     private createUi(): void {
-        const logo = { fontFamily: FONT, fontSize: '27px', fontStyle: 'bold' };
+        this.add.image(0, 60, LOGO_KEY).setOrigin(0).setDisplaySize(LOGO_SIZE, LOGO_SIZE);
 
-        this.add.text(18, 12, 'TETRIS', { ...logo, color: '#9cc4ff' }).setShadow(0, 3, '#000000', 6);
-        this.add.text(18, 42, 'TAC TOE', { ...logo, color: '#ff9ab8' }).setShadow(0, 3, '#000000', 6);
+        this.add.text(32, 112 + STAT_PANEL_OFFSET_Y, 'SCORE', labelStyle);
+        this.scoreText = this.add.text(32, 130 + STAT_PANEL_OFFSET_Y, '0', valueStyle);
+        this.divider(32, 164 + STAT_PANEL_OFFSET_Y, 134);
 
-        this.add.text(32, 112, 'SCORE', labelStyle);
-        this.scoreText = this.add.text(32, 130, '0', valueStyle);
-        this.divider(32, 164, 134);
+        this.add.text(32, 170 + STAT_PANEL_OFFSET_Y, 'BEST', labelStyle);
+        this.bestText = this.add.text(32, 188 + STAT_PANEL_OFFSET_Y, '0', valueStyle);
+        this.divider(32, 222 + STAT_PANEL_OFFSET_Y, 134);
 
-        this.add.text(32, 170, 'BEST', labelStyle);
-        this.bestText = this.add.text(32, 188, '0', valueStyle);
-        this.divider(32, 222, 134);
+        this.add.text(32, 228 + STAT_PANEL_OFFSET_Y, 'LEVEL', labelStyle);
+        this.levelText = this.add.text(32, 246 + STAT_PANEL_OFFSET_Y, '1', valueStyle);
+        this.divider(32, 280 + STAT_PANEL_OFFSET_Y, 134);
 
-        this.add.text(32, 228, 'LEVEL', labelStyle);
-        this.levelText = this.add.text(32, 246, '1', valueStyle);
-        this.divider(32, 280, 134);
+        this.add.text(32, 286 + STAT_PANEL_OFFSET_Y, 'LINES', labelStyle);
+        this.linesText = this.add.text(32, 304 + STAT_PANEL_OFFSET_Y, '0', valueStyle);
+        this.divider(32, 338 + STAT_PANEL_OFFSET_Y, 134);
 
-        this.add.text(32, 286, 'LINES', labelStyle);
-        this.linesText = this.add.text(32, 304, '0', valueStyle);
-        this.divider(32, 338, 134);
+        this.add.text(32, 344 + STAT_PANEL_OFFSET_Y, 'TASKS', labelStyle);
+        this.tasksText = this.add.text(32, 362 + STAT_PANEL_OFFSET_Y, '0', valueStyle);
+        this.divider(32, 396 + STAT_PANEL_OFFSET_Y, 134);
 
-        this.add.text(32, 344, 'TASKS', labelStyle);
-        this.tasksText = this.add.text(32, 362, '0', valueStyle);
-        this.divider(32, 396, 134);
-
-        this.add.text(32, 402, 'DESTROYED', labelStyle);
-        this.destroyedXText = this.add.text(32, 420, 'X 0', {
+        this.add.text(32, 402 + STAT_PANEL_OFFSET_Y, 'DESTROYED', labelStyle);
+        this.destroyedXText = this.add.text(32, 420 + STAT_PANEL_OFFSET_Y, 'X 0', {
             ...valueStyle,
             fontSize: '18px',
             color: '#9cc4ff',
         });
-        this.destroyedOText = this.add.text(92, 420, 'O 0', {
+        this.destroyedOText = this.add.text(92, 420 + STAT_PANEL_OFFSET_Y, 'O 0', {
             ...valueStyle,
             fontSize: '18px',
             color: '#ffb26b',
         });
 
-        this.add.text(32, 504, 'TIP', {
+        this.add.text(32, 504 + STAT_PANEL_OFFSET_Y, 'TIP', {
             fontFamily: FONT,
             fontSize: '14px',
             fontStyle: 'bold',
             color: '#ffd76a',
         });
-        this.add.text(32, 528, 'Собери 3 в ряд. С уровнем клеток меньше, а сами они крупнее.', {
+        this.add.text(32, 528 + STAT_PANEL_OFFSET_Y, 'Собери 3 в ряд. С уровнем клеток меньше, а сами они крупнее.', {
             fontFamily: FONT,
             fontSize: '13px',
             color: MUTED_COLOR,
@@ -347,7 +352,7 @@ export default class MainScene extends Phaser.Scene {
             lineSpacing: 4,
         });
 
-        this.add.text(32, 606, 'Сначала прямые, потом диагонали.', {
+        this.add.text(32, 606 + STAT_PANEL_OFFSET_Y, 'Сначала прямые, потом диагонали.', {
             fontFamily: FONT,
             fontSize: '11px',
             color: '#ffd76a',

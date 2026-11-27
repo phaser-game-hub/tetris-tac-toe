@@ -22,3 +22,11 @@ body {
     display: block;
     touch-action: none;
 }
+
+@font-face {
+    font-family: 'Baloo';
+    src: url('/font/baloo-cyrillic.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: block;
+}
